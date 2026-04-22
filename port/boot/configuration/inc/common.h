@@ -54,7 +54,7 @@
 //////////////////////////////////
 //#define WIZ2000_MB              1
 #define S2E_SSL                   1
-#define WIZ5XXSR-RP               2
+#define WIZ5XXSR_RP_TYPE          2
 #define UNKNOWN_DEVICE          0xff
 
 //////////////////////////////////
@@ -126,5 +126,4 @@ typedef enum {
 #define STR_MODBUS_TCP          "ModbusTCP"
 
 #endif //_COMMON_H
-
 

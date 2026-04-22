@@ -12,19 +12,15 @@
 #include "wizchip_conf.h"
 #include "dhcp.h"
 #include "dhcp_cb.h"
-#include "seg.h"
 #include "WIZ5XXSR-RP_Debug.h"
 #include "socket.h"
 #include "w5x00_spi.h"
 #include "w5x00_gpio_irq.h"
 
 #include "gpioHandler.h"
+#include "seg.h"
 
-extern xSemaphoreHandle net_segcp_udp_sem;
-extern xSemaphoreHandle net_segcp_tcp_sem;
 extern xSemaphoreHandle net_http_webserver_sem;
-extern xSemaphoreHandle net_seg_sem;
-extern xSemaphoreHandle net_seg_u2e_sem;
 
 extern uint8_t g_send_buf[DATA_BUF_SIZE];
 extern uint8_t g_recv_mqtt_buf[DATA_BUF_SIZE];
@@ -43,6 +39,7 @@ void net_status_task(void *argument) {
     DevConfig *dev_config = get_DevConfig_pointer();
     uint8_t phylink_count;
     int ret;
+    wiz_NetInfo gWIZNETINFO;
 
     while (1) {
         switch (g_net_status) {
@@ -61,16 +58,11 @@ void net_status_task(void *argument) {
             break;
 
         case NET_LINK_CONNECTED:
-            xSemaphoreGive(net_segcp_udp_sem);
             if (dev_config->network_option.dhcp_use) {
                 set_stop_dhcp_flag(0);
-                //PRT_INFO("DHCP waiting 3 seconds...\r\n");
-                //vTaskDelay(3000); // Wait for 3 seconds before starting DHCP
                 if (process_dhcp() == DHCP_IP_LEASED) { // DHCP success
                     flag_process_dhcp_success = ON;
                 } else {  // DHCP failed
-                    //dev_config->network_option.dhcp_use = 0;
-                    //Net_Conf(); // Set default static IP settings
                     PRT_ERR("NET_LINK_CONNECTED DHCP Failed\r\n");
                     wizchip_recovery(dev_config->network_connection.working_mode);
                     break;
@@ -78,26 +70,11 @@ void net_status_task(void *argument) {
             }
             display_Net_Info();
             display_Dev_Info_dhcp();
-
-            if (dev_config->network_connection.working_mode != TCP_SERVER_MODE)  {
-                if (dev_config->network_connection.dns_use) {
-                    //PRT_INFO("DNS waiting 3 seconds...\r\n");
-                    //vTaskDelay(3000); // Wait for 3 seconds before starting DHCP
-                    if (process_dns() == DNS_RET_SUCCESS) {
-                        flag_process_dns_success = ON;
-                        PRT_INFO("flag_process_dns_success = ON\r\n");
-                    } else {
-                        PRT_ERR("NET_LINK_CONNECTED DNS Failed\r\n");
-                        flag_process_dns_success = OFF;
-                    }
-                    display_Dev_Info_dns();
-                }
-            }
             g_net_status = NET_IP_UP;
-            xSemaphoreGive(net_seg_sem);
-            xSemaphoreGive(net_segcp_tcp_sem);
             xSemaphoreGive(net_http_webserver_sem);
-            xSemaphoreGive(net_seg_u2e_sem);
+            ctlnetwork(CN_GET_NETINFO, (void *)&gWIZNETINFO);
+            printf("HTTPS server ready: https://%d.%d.%d.%d/\r\n",
+                   gWIZNETINFO.ip[0], gWIZNETINFO.ip[1], gWIZNETINFO.ip[2], gWIZNETINFO.ip[3]);
             break;
 
         case NET_IP_UP:
@@ -108,22 +85,16 @@ void net_status_task(void *argument) {
                         if (ret == DHCP_FAILED) {
                             PRT_ERR("NET_IP_UP DHCP Failed\r\n");
                             wizchip_recovery(dev_config->network_connection.working_mode);
-                            process_socket_termination(SEG_DATA0_SOCK, SOCK_TERMINATION_DELAY, TRUE);
                             break;
                         }
                     }
                 }
                 if (check_phylink_status() == PHY_LINK_OFF) {
-#if 1   //restore status
                     PRT_ERR("NET_IP_UP PHY_LINK_OFF\r\n");
                     wizchip_recovery(dev_config->network_connection.working_mode);
                     if (get_device_status() != ST_ATMODE) {
                         set_device_status(ST_OPEN);
                     }
-                    //process_socket_termination(SEG_DATA0_SOCK, SOCK_TERMINATION_DELAY, TRUE);
-#else   //device reset
-                    device_raw_reboot();
-#endif
                     break;
                 }
                 vTaskDelay(2000);

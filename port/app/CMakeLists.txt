@@ -128,6 +128,8 @@ target_sources(APP_CONFIG_FILES PUBLIC
 
 target_include_directories(APP_CONFIG_FILES PUBLIC
         ${APP_PORT_DIR}/configuration/inc
+        ${APP_PORT_DIR}/serial_to_ethernet/inc
+        ${APP_PORT_DIR}/aws-iot-device-sdk-embedded-C/inc
         ${APP_PORT_DIR}
         )
         
@@ -135,17 +137,15 @@ target_link_libraries(APP_CONFIG_FILES PUBLIC
         APP_MCU_FILES
         APP_BOARD_FILES
         APP_IOLIBRARY_FILES
-        APP_S2E_FILES
-        APP_PLATFORM_FILES
+        AWS_SDK_FILES
         )
 
-add_library(APP_HTTPSERVER_FILES STATIC)
+add_library(APP_HTTPSERVER_FILES STATIC EXCLUDE_FROM_ALL)
 
-target_sources(APP_CONFIG_FILES PUBLIC
+target_sources(APP_HTTPSERVER_FILES PUBLIC
         ${APP_PORT_DIR}/http_server/src/httpParser.c
         ${APP_PORT_DIR}/http_server/src/httpServer.c
         ${APP_PORT_DIR}/http_server/src/httpUtil.c
-        ${APP_PORT_DIR}/configuration/src/util.c
         )
 
 target_include_directories(APP_HTTPSERVER_FILES PUBLIC
@@ -176,6 +176,7 @@ target_link_libraries(APP_S2E_FILES PUBLIC
         APP_CONFIG_FILES
         APP_IOLIBRARY_FILES
         APP_PLATFORM_FILES
+        APP_MODBUS_FILES
         APP_AWS_SDK_PORT_FILES
         )
 
@@ -203,6 +204,9 @@ target_sources(APP_PLATFORM_FILES PUBLIC
 
 target_include_directories(APP_PLATFORM_FILES PUBLIC
         ${APP_PORT_DIR}/platform_handler/inc
+        ${APP_PORT_DIR}/html_file
+        ${APP_PORT_DIR}/serial_to_ethernet/inc
+        ${APP_PORT_DIR}/aws-iot-device-sdk-embedded-C/inc
         ${APP_PORT_DIR}
 )
 
@@ -210,10 +214,9 @@ target_link_libraries(APP_PLATFORM_FILES PUBLIC
         APP_MCU_FILES
         APP_BOARD_FILES
         APP_CONFIG_FILES
-        APP_HTTPSERVER_FILES
         APP_IOLIBRARY_FILES
         APP_MBEDTLS_FILES
-        APP_MODBUS_FILES
+        AWS_SDK_FILES
 )
 
 add_library(APP_MODBUS_FILES STATIC)

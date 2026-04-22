@@ -149,7 +149,7 @@ add_subdirectory(${APP_PORT_DIR})
 ## Automatically run html_to_c_header.py before build
 add_custom_target(
     html_to_c_header
-    COMMAND python ${CMAKE_SOURCE_DIR}/tools/html_to_c_header.py
+    COMMAND py -3 ${CMAKE_SOURCE_DIR}/tools/html_to_c_header.py
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Run html_to_c_header.py before build"
 )
@@ -161,7 +161,7 @@ add_dependencies(App_linker html_to_c_header)
 ## Automatically run merge_hex.py after build
 add_custom_target(
     merge_hex ALL
-    COMMAND python ${CMAKE_SOURCE_DIR}/tools/merge_hex.py
+    COMMAND py -3 ${CMAKE_SOURCE_DIR}/tools/merge_hex.py
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Run merge_hex.py after build"
 )
@@ -172,7 +172,7 @@ add_dependencies(merge_hex Boot App_linker)
 ## Automatically run style/restyle.py after build
 add_custom_target(
     restyle ALL
-    COMMAND python ${CMAKE_SOURCE_DIR}/style/restyle.py
+    COMMAND py -3 ${CMAKE_SOURCE_DIR}/style/restyle.py
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Run style/restyle.py after build"
 )
@@ -183,7 +183,7 @@ add_dependencies(restyle Boot App_linker)
 ## Automatically run hex_to_uf2_converter.py after merge_hex
 add_custom_target(
     hex_to_uf2_converter ALL
-    COMMAND python ${CMAKE_SOURCE_DIR}/tools/hex_to_uf2_converter.py
+    COMMAND py -3 ${CMAKE_SOURCE_DIR}/tools/hex_to_uf2_converter.py
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     COMMENT "Run hex_to_uf2_converter.py to create merged UF2 file"
 )
