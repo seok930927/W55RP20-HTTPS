@@ -16,6 +16,11 @@ void read_storage(teDATASTORAGE stype, void *data, uint16_t size) {
     case STORAGE_CONFIG:
         read_flash(FLASH_DEV_INFO_ADDR, data, size);
         break;
+
+    case STORAGE_AUTH:
+        read_flash(FLASH_AUTH_ADDR, data, size);
+        break;
+
     default:
         break;
     }
@@ -46,6 +51,10 @@ void write_storage(teDATASTORAGE stype, uint32_t addr, void *data, uint16_t size
 
     case STORAGE_PKEY:
         write_flash(FLASH_PRIKEY_ADDR, data, size);
+        break;
+
+    case STORAGE_AUTH:
+        write_flash(FLASH_AUTH_ADDR, data, size);
         break;
 
     default:
