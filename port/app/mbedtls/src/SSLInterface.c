@@ -13,6 +13,7 @@
 #include "mbedtls/x509_crt.h"
 #include "mbedtls/error.h"
 #include "mbedtls/debug.h"
+#include "mbedtls/ssl_cache.h"
 #include "psa/crypto.h"
 #include "port_common.h"
 
@@ -28,6 +29,9 @@
 
 //unsigned char tempBuf[DEBUG_BUFFER_SIZE] = {0,};
 static int wiz_tls_init_state;
+
+static mbedtls_ssl_cache_context https_session_cache;
+static uint8_t https_session_cache_initialized = 0;
 static const char HTTPS_SERVER_CERT[] =
     "-----BEGIN CERTIFICATE-----\r\n"
     "MIIEFjCCAv6gAwIBAgIUdjlBBGLrlijs1C6BhBV+eoE0r0QwDQYJKoZIhvcNAQEL\r\n"
@@ -427,6 +431,15 @@ int wiz_tls_server_init(wiz_tls_context* tlsContext, int* socket_fd) {
         PRT_SSL(" failed\r\n  ! mbedtls_ssl_conf_own_cert returned -0x%x\r\n", -ret);
         return -1;
     }
+
+    if (!https_session_cache_initialized) {
+        mbedtls_ssl_cache_init(&https_session_cache);
+        https_session_cache_initialized = 1;
+    }
+    mbedtls_ssl_conf_session_cache(tlsContext->conf,
+                                   &https_session_cache,
+                                   mbedtls_ssl_cache_get,
+                                   mbedtls_ssl_cache_set);
 
     ret = mbedtls_ssl_setup(tlsContext->ssl, tlsContext->conf);
     if (ret != 0) {
