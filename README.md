@@ -2,7 +2,8 @@
 <img width="446" height="408" alt="image" src="https://github.com/user-attachments/assets/141f1c5b-37d5-401d-9260-aef4a5d3e0ac" />
 
 생성 PW: wiznet_w55rp20
-![Uploading image.png…]()
+
+<img width="841" height="423" alt="image" src="https://github.com/user-attachments/assets/d0c17db3-1d8d-4aee-b7e7-0e5264d43f57" />
 
 
 ## Warning
