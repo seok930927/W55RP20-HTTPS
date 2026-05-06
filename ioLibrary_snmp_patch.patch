@@ -1,0 +1,98 @@
+# Base commit: b981401 (ioLibrary_Driver upstream HEAD "Update README.md")
+# Apply inside: libraries/ioLibrary_Driver/
+#
+# How to apply:
+#   cd libraries/ioLibrary_Driver
+#   git checkout b981401
+#   git apply ../../ioLibrary_snmp_patch.patch
+#
+# Changes:
+#   snmp.c       - Fix socket range check (> -> >=), guard initial_Trap with SNMP_ENABLE_INITIAL_TRAP
+#   snmp_custom.c - Update system MIB OID values for W55RP20-S2E
+diff --git a/Internet/SNMP/snmp.c b/Internet/SNMP/snmp.c
+index b705097..164e3ba 100644
+--- a/Internet/SNMP/snmp.c
++++ b/Internet/SNMP/snmp.c
+@@ -105,12 +105,19 @@ void snmpd_init(uint8_t * managerIP, uint8_t * agentIP, uint8_t sn_agent, uint8_
+     SOCK_SNMP_AGENT = sn_agent;
+     SOCK_SNMP_TRAP = sn_trap;
+
+-    if((SOCK_SNMP_AGENT > _WIZCHIP_SOCK_NUM_) || (SOCK_SNMP_TRAP > _WIZCHIP_SOCK_NUM_)) return;
++    if((SOCK_SNMP_AGENT >= _WIZCHIP_SOCK_NUM_) || (SOCK_SNMP_TRAP >= _WIZCHIP_SOCK_NUM_)) return;
+
+     startTime = getSNMPTimeTick(); // Start time (unit: 10ms)
+     initTable(); // Settings for OID entry values
+-
+-    initial_Trap(managerIP, agentIP);
++
++#ifdef SNMP_ENABLE_INITIAL_TRAP
++    if((managerIP != NULL) && (agentIP != NULL)) {
++        initial_Trap(managerIP, agentIP);
++    }
++#else
++    (void)managerIP;
++    (void)agentIP;
++#endif
+
+ /*
+     // Example Codes for SNMP Trap
+@@ -150,7 +157,7 @@ int32_t snmpd_run(void)
+ 	uint8_t svr_addr[6];
+ 	uint16_t  svr_port;
+
+-	if(SOCK_SNMP_AGENT > _WIZCHIP_SOCK_NUM_) return -99;
++	if(SOCK_SNMP_AGENT >= _WIZCHIP_SOCK_NUM_) return -99;
+
+ 	switch(getSn_SR(SOCK_SNMP_AGENT))
+ 	{
+diff --git a/Internet/SNMP/snmp_custom.c b/Internet/SNMP/snmp_custom.c
+index 68590c7..5dcea7e 100644
+--- a/Internet/SNMP/snmp_custom.c
++++ b/Internet/SNMP/snmp_custom.c
+@@ -20,12 +20,12 @@ dataEntryType snmpData[] =
+     // System MIB
+ 	// SysDescr Entry
+ 	{8, {0x2b, 6, 1, 2, 1, 1, 1, 0},
+-	SNMPDTYPE_OCTET_STRING, 30, {"WIZnet Embedded SNMP Agent"},
++	SNMPDTYPE_OCTET_STRING, 30, {"W55RP20-S2E SNMP Agent"},
+ 	NULL, NULL},
+
+ 	// SysObjectID Entry
+ 	{8, {0x2b, 6, 1, 2, 1, 1, 2, 0},
+-	SNMPDTYPE_OBJ_ID, 8, {"\x2b\x06\x01\x02\x01\x01\x02\x00"},
++	SNMPDTYPE_OBJ_ID, 0x0a, {"\x2b\x06\x01\x04\x01\x81\x9b\x19\x01\x00"},
+ 	NULL, NULL},
+
+ 	// SysUptime Entry
+@@ -35,17 +35,17 @@ dataEntryType snmpData[] =
+
+ 	// sysContact Entry
+ 	{8, {0x2b, 6, 1, 2, 1, 1, 4, 0},
+-	SNMPDTYPE_OCTET_STRING, 30, {"http://www.wizwiki.net/forum"},
++	SNMPDTYPE_OCTET_STRING, 30, {"WIZnet"},
+ 	NULL, NULL},
+
+ 	// sysName Entry
+ 	{8, {0x2b, 6, 1, 2, 1, 1, 5, 0},
+-	SNMPDTYPE_OCTET_STRING, 30, {"http://www.wiznet.co.kr"},
++	SNMPDTYPE_OCTET_STRING, 30, {"W55RP20-S2E"},
+ 	NULL, NULL},
+
+ 	// Location Entry
+ 	{8, {0x2b, 6, 1, 2, 1, 1, 6, 0},
+-	SNMPDTYPE_OCTET_STRING, 30, {"4F Humax Village"},
++	SNMPDTYPE_OCTET_STRING, 30, {"Unspecified"},
+ 	NULL, NULL},
+
+ 	// SysServices
+@@ -95,8 +95,8 @@ const int32_t maxData = (sizeof(snmpData) / sizeof(dataEntryType));
+
+ void initTable()
+ {
+-	// Example integer value for [OID 1.3.6.1.2.1.1.7.0]
+-	snmpData[6].u.intval = -5;
++	// sysServices: datalink + internet + applications
++	snmpData[6].u.intval = 70;
+
+ }
+

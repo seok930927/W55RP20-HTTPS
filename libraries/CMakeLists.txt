@@ -172,6 +172,23 @@ target_include_directories(SNTP_FILES PUBLIC
         ${WIZNET_DIR}/Internet/SNTP
         )
 
+# SNMP
+add_library(SNMP_FILES STATIC)
+
+target_sources(SNMP_FILES PUBLIC
+        ${WIZNET_DIR}/Internet/SNMP/snmp.c
+        ${WIZNET_DIR}/Internet/SNMP/snmp_custom.c
+        )
+
+target_include_directories(SNMP_FILES PUBLIC
+        ${WIZNET_DIR}/Ethernet
+        ${WIZNET_DIR}/Internet/SNMP
+        )
+
+target_link_libraries(SNMP_FILES PUBLIC
+        ETHERNET_FILES
+        )
+
 include(${AWS_SDK_DIR}/libraries/standard/coreHTTP/httpFilePaths.cmake)
 include(${AWS_SDK_DIR}/libraries/standard/coreMQTT/mqttFilePaths.cmake)
 

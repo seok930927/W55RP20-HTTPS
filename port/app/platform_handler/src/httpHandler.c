@@ -19,8 +19,7 @@ extern xSemaphoreHandle net_http_webserver_sem;
 static const uint8_t https_server_socks[MAX_HTTPSOCK] = {
     SOCK_HTTPSERVER_1,
     SOCK_HTTPSERVER_2,
-    SOCK_HTTPSERVER_3,
-    SOCK_HTTPSERVER_4
+    SOCK_HTTPSERVER_3
 };
 static wiz_tls_context https_tls_ctx[MAX_HTTPSOCK];
 static uint8_t https_tls_active[MAX_HTTPSOCK] = { FALSE, };

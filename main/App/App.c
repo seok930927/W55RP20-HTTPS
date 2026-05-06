@@ -24,6 +24,7 @@
 #include "httpHandler.h"
 #include "wizchip_conf.h"
 #include "netHandler.h"
+#include "snmpHandler.h"
 
 #include "w5x00_spi.h"
 
@@ -39,6 +40,9 @@
 
 #define HTTP_WEBSERVER_TASK_STACK_SIZE 2048
 #define HTTP_WEBSERVER_TASK_PRIORITY 23
+
+#define SNMP_TASK_STACK_SIZE 2048
+#define SNMP_TASK_PRIORITY 7
 
 #define HEAP_MONITOR_TASK_STACK_SIZE 1024
 #define HEAP_MONITOR_TASK_PRIORITY 6
@@ -172,6 +176,12 @@ void start_task(void *argument) {
     RP2040_Init();
     RP2040_W5X00_Init();
 
+    // 현재 시스템 클럭(Hz) 가져오기
+    uint32_t current_hz = clock_get_hz(clk_sys);
+
+    // MHz 단위로 변환해서 출력
+    printf("Current System Clock: %lu Hz (%lu MHz)\n", current_hz, current_hz / 1000000);
+
     load_DevConfig_from_storage();
     set_minimal_runtime_config();
     RP2040_Board_Init();
@@ -190,7 +200,8 @@ void start_task(void *argument) {
     reset_timer = xTimerCreate("reset_timer", pdMS_TO_TICKS(5000), pdFALSE, 0, reset_timer_callback);
     xTaskCreate(net_status_task, "Net_Status_Task", NET_TASK_STACK_SIZE, NULL, NET_TASK_PRIORITY, NULL);
     xTaskCreate(http_webserver_task, "http_webserver_task", HTTP_WEBSERVER_TASK_STACK_SIZE, NULL, HTTP_WEBSERVER_TASK_PRIORITY, NULL);
-    xTaskCreate(heap_monitor_task, "Heap_Monitor_Task", HEAP_MONITOR_TASK_STACK_SIZE, NULL, HEAP_MONITOR_TASK_PRIORITY, NULL);
+    xTaskCreate(snmp_agent_task, "SNMP_Agent_Task", SNMP_TASK_STACK_SIZE, NULL, SNMP_TASK_PRIORITY, NULL);
+    // xTaskCreate(heap_monitor_task, "Heap_Monitor_Task", HEAP_MONITOR_TASK_STACK_SIZE, NULL, HEAP_MONITOR_TASK_PRIORITY, NULL);
 #ifdef __USE_WATCHDOG__
     watchdog_enable(8388, 0);
 #endif
