@@ -1,28 +1,48 @@
-# Base commit: b981401 (ioLibrary_Driver upstream HEAD "Update README.md")
-# Apply inside: libraries/ioLibrary_Driver/
+﻿# Base commit: b981401 (ioLibrary_Driver upstream HEAD "Update README.md")
+# Apply inside: libraries/
 #
 # How to apply:
 #   cd libraries/ioLibrary_Driver
 #   git checkout b981401
-#   git apply ../../ioLibrary_snmp_patch.patch
+#   cd ..
+#   git apply ../ioLibrary_snmp_patch.patch
 #
 # Changes:
-#   snmp.c       - Fix socket range check (> -> >=), guard initial_Trap with SNMP_ENABLE_INITIAL_TRAP
+#   snmp.h       - Add SNMPv2c constants (SNMP_V2C, GET_BULK_REQUEST, exception types, error codes)
+#   snmp.c       - SNMPv2c support: version parsing, noSuchObject/endOfMibView, GetBulkRequest,
+#                  SNMP_ENABLE_INITIAL_TRAP guard, socket range fix (> -> >=), snmp_sendTrapV2c()
 #   snmp_custom.c - Update system MIB OID values for W55RP20-S2E
 diff --git a/Internet/SNMP/snmp.c b/Internet/SNMP/snmp.c
-index b705097..164e3ba 100644
+index b705097..84ef008 100644
 --- a/Internet/SNMP/snmp.c
 +++ b/Internet/SNMP/snmp.c
-@@ -105,12 +105,19 @@ void snmpd_init(uint8_t * managerIP, uint8_t * agentIP, uint8_t sn_agent, uint8_
+@@ -25,6 +25,8 @@ void insertRespLen(int32_t reqStart, int32_t respStart, int32_t size);
+ int32_t parseVarBind(int32_t reqType, int32_t index);
+ int32_t parseSequence(int32_t reqType, int32_t index);
+ int32_t parseSequenceOf(int32_t reqType);
++static int32_t writeBulkVarBind(int32_t id, uint8_t *fallback_oid, uint8_t fallback_len);
++static int32_t parseGetBulk(int32_t nonRepeaters, int32_t maxRepetitions);
+ int32_t parseRequest();
+ int32_t parseCommunity();
+ int32_t parseVersion();
+@@ -55,6 +57,7 @@ static uint8_t SOCK_SNMP_TRAP;
+ 
+ uint8_t packet_trap[MAX_TRAPMSG_LEN] = {0,};
+ uint8_t errorStatus, errorIndex;
++static uint8_t snmp_version = SNMP_V1;
+ 
+ 
+ /********************************************************************************************/
+@@ -105,12 +108,19 @@ void snmpd_init(uint8_t * managerIP, uint8_t * agentIP, uint8_t sn_agent, uint8_
      SOCK_SNMP_AGENT = sn_agent;
      SOCK_SNMP_TRAP = sn_trap;
-
+ 
 -    if((SOCK_SNMP_AGENT > _WIZCHIP_SOCK_NUM_) || (SOCK_SNMP_TRAP > _WIZCHIP_SOCK_NUM_)) return;
 +    if((SOCK_SNMP_AGENT >= _WIZCHIP_SOCK_NUM_) || (SOCK_SNMP_TRAP >= _WIZCHIP_SOCK_NUM_)) return;
-
+ 
      startTime = getSNMPTimeTick(); // Start time (unit: 10ms)
      initTable(); // Settings for OID entry values
--
+-    
 -    initial_Trap(managerIP, agentIP);
 +
 +#ifdef SNMP_ENABLE_INITIAL_TRAP
@@ -33,18 +53,426 @@ index b705097..164e3ba 100644
 +    (void)managerIP;
 +    (void)agentIP;
 +#endif
-
+ 
  /*
      // Example Codes for SNMP Trap
-@@ -150,7 +157,7 @@ int32_t snmpd_run(void)
+@@ -150,7 +160,7 @@ int32_t snmpd_run(void)
  	uint8_t svr_addr[6];
  	uint16_t  svr_port;
-
+ 
 -	if(SOCK_SNMP_AGENT > _WIZCHIP_SOCK_NUM_) return -99;
 +	if(SOCK_SNMP_AGENT >= _WIZCHIP_SOCK_NUM_) return -99;
-
+     
  	switch(getSn_SR(SOCK_SNMP_AGENT))
  	{
+@@ -336,7 +346,7 @@ int32_t setEntry(int32_t id, void *val, int32_t vlen, uint8_t dataType, int32_t
+ 
+ 	if (snmpData[id].dataType != dataType)
+ 	{
+-		errorStatus = BAD_VALUE; 
++		errorStatus = (snmp_version == SNMP_V2C) ? WRONG_TYPE : BAD_VALUE;
+ 		errorIndex = index;
+ 		return INVALID_DATA_TYPE;
+ 	}
+@@ -423,6 +433,7 @@ int32_t parseTLV(const uint8_t *msg, int32_t index, tlvStructType *tlv)
+ 	case GET_REQUEST:
+ 	case GET_NEXT_REQUEST:
+ 	case SET_REQUEST:
++	case GET_BULK_REQUEST:
+ 		tlv->nstart = tlv->vstart;
+ 		break;
+ 	default:
+@@ -530,11 +541,24 @@ int32_t parseVarBind(int32_t reqType, int32_t index)
+ 	}
+ 	else
+ 	{
+-		seglen = value.nstart - value.start;
+-		COPY_SEGMENT(value);
++		if (snmp_version == SNMP_V2C)
++		{
++			// v2c: embed exception value in VarBind, no global error status
++			uint8_t exception_type = (reqType == GET_NEXT_REQUEST)
++				? SNMPDTYPE_END_OF_MIB_VIEW : SNMPDTYPE_NO_SUCH_OBJECT;
+ 
+-		errorIndex = index;
+-		errorStatus = NO_SUCH_NAME;
++			request_msg.index += (value.nstart - value.start);
++			response_msg.buffer[response_msg.index++] = exception_type;
++			response_msg.buffer[response_msg.index++] = 0x00;
++			seglen = 2;
++		}
++		else
++		{
++			seglen = value.nstart - value.start;
++			COPY_SEGMENT(value);
++			errorIndex = index;
++			errorStatus = NO_SUCH_NAME;
++		}
+ 	}
+ 
+ 	size += seglen;
+@@ -565,6 +589,136 @@ int32_t parseSequence(int32_t reqType, int32_t index)
+ }
+ 
+ 
++#define MAX_BULK_VARS 8
++
++static int32_t writeBulkVarBind(int32_t id, uint8_t *fallback_oid, uint8_t fallback_len)
++{
++	int32_t inner = 0;
++	int32_t seq_start = response_msg.index;
++
++	if ((response_msg.index + 4 + MAX_OID + MAX_STRING) >= MAX_SNMPMSG_LEN) return -1;
++
++	response_msg.buffer[response_msg.index++] = SNMPDTYPE_SEQUENCE;
++	int32_t len_pos = response_msg.index++;
++
++	if (id >= 0 && id < maxData)
++	{
++		uint8_t oid_len = snmpData[id].oidlen;
++		response_msg.buffer[response_msg.index++] = SNMPDTYPE_OBJ_ID;
++		response_msg.buffer[response_msg.index++] = oid_len;
++		memcpy(&response_msg.buffer[response_msg.index], snmpData[id].oid, oid_len);
++		response_msg.index += oid_len;
++		inner += 2 + oid_len;
++
++		uint8_t dtype;
++		int32_t vlen;
++		getEntry(id, &dtype, &response_msg.buffer[response_msg.index + 2], &vlen);
++		response_msg.buffer[response_msg.index++] = dtype;
++		response_msg.buffer[response_msg.index++] = (uint8_t)vlen;
++		response_msg.index += vlen;
++		inner += 2 + vlen;
++	}
++	else
++	{
++		response_msg.buffer[response_msg.index++] = SNMPDTYPE_OBJ_ID;
++		response_msg.buffer[response_msg.index++] = fallback_len;
++		memcpy(&response_msg.buffer[response_msg.index], fallback_oid, fallback_len);
++		response_msg.index += fallback_len;
++		inner += 2 + fallback_len;
++
++		response_msg.buffer[response_msg.index++] = SNMPDTYPE_END_OF_MIB_VIEW;
++		response_msg.buffer[response_msg.index++] = 0x00;
++		inner += 2;
++	}
++
++	response_msg.buffer[len_pos] = (uint8_t)inner;
++	return inner + 2;
++}
++
++
++static int32_t parseGetBulk(int32_t nonRepeaters, int32_t maxRepetitions)
++{
++	tlvStructType seqof;
++	int32_t size = 0, seglen, respLoc;
++	int32_t i, rep;
++
++	int32_t  cur_ids[MAX_BULK_VARS];
++	uint8_t  orig_oids[MAX_BULK_VARS][MAX_OID];
++	uint8_t  orig_oid_lens[MAX_BULK_VARS];
++	uint8_t  eom[MAX_BULK_VARS];
++	int32_t  var_count = 0;
++
++	parseTLV(request_msg.buffer, request_msg.index, &seqof);
++	if (request_msg.buffer[seqof.start] != SNMPDTYPE_SEQUENCE_OF) return -1;
++
++	seglen = seqof.vstart - seqof.start;
++	respLoc = response_msg.index;
++	COPY_SEGMENT(seqof);
++
++	// Collect all requested VarBind OIDs and compute starting MIB indices
++	while (request_msg.index < request_msg.len && var_count < MAX_BULK_VARS)
++	{
++		tlvStructType seq, name;
++
++		parseTLV(request_msg.buffer, request_msg.index, &seq);
++		if (request_msg.buffer[seq.start] != SNMPDTYPE_SEQUENCE) break;
++
++		request_msg.index = seq.vstart;
++		parseTLV(request_msg.buffer, request_msg.index, &name);
++		if (request_msg.buffer[name.start] != SNMPDTYPE_OBJ_ID) break;
++
++		orig_oid_lens[var_count] = (uint8_t)name.len;
++		memcpy(orig_oids[var_count], &request_msg.buffer[name.vstart], name.len);
++
++		int32_t id = findEntry(&request_msg.buffer[name.vstart], name.len);
++		cur_ids[var_count] = id + 1; // GET-NEXT: advance past found entry
++		eom[var_count] = (cur_ids[var_count] >= maxData) ? 1 : 0;
++
++		request_msg.index = seq.nstart;
++		var_count++;
++	}
++
++	if (maxRepetitions < 0) maxRepetitions = 0;
++	if (maxRepetitions > maxData) maxRepetitions = maxData;
++
++	// Non-repeaters: single GET-NEXT each
++	for (i = 0; i < nonRepeaters && i < var_count; i++)
++	{
++		int32_t written = writeBulkVarBind(eom[i] ? -1 : cur_ids[i],
++		                                   orig_oids[i], orig_oid_lens[i]);
++		if (written < 0) goto done;
++		size += written;
++	}
++
++	// Repeaters: up to maxRepetitions iterations over remaining vars
++	for (rep = 0; rep < maxRepetitions; rep++)
++	{
++		int32_t all_eom = 1;
++		for (i = nonRepeaters; i < var_count; i++)
++			if (!eom[i]) { all_eom = 0; break; }
++		if (all_eom) break;
++
++		for (i = nonRepeaters; i < var_count; i++)
++		{
++			int32_t written = writeBulkVarBind(eom[i] ? -1 : cur_ids[i],
++			                                   orig_oids[i], orig_oid_lens[i]);
++			if (written < 0) goto done;
++			size += written;
++
++			if (!eom[i])
++			{
++				cur_ids[i]++;
++				if (cur_ids[i] >= maxData) eom[i] = 1;
++			}
++		}
++	}
++
++done:
++	insertRespLen(seqof.start, respLoc, size);
++	return size + seglen;
++}
++
++
+ int32_t parseSequenceOf(int32_t reqType)
+ {
+ 	int32_t seglen;
+@@ -625,7 +779,23 @@ int32_t parseRequest()
+ 	size += seglen;
+ 	COPY_SEGMENT(errIndex);
+ 
+-	ret = parseSequenceOf(reqType);
++	if (reqType == GET_BULK_REQUEST)
++	{
++		// errStatus field = non-repeaters, errIndex field = max-repetitions
++		int32_t nonRepeaters   = request_msg.buffer[errStatus.vstart];
++		int32_t maxRepetitions = request_msg.buffer[errIndex.vstart];
++
++		// Zero out the copied errStatus/errIndex in response (always 0 for GetBulk response)
++		response_msg.buffer[errStatus.vstart] = 0;
++		response_msg.buffer[errIndex.vstart]  = 0;
++
++		ret = parseGetBulk(nonRepeaters, maxRepetitions);
++	}
++	else
++	{
++		ret = parseSequenceOf(reqType);
++	}
++
+ 	if (ret == -1) return -1;
+ 	else size += ret;
+ 
+@@ -678,8 +848,9 @@ int32_t parseVersion()
+ 
+ 	size = parseTLV(request_msg.buffer, request_msg.index, &tlv);
+ 
+-	if (!((request_msg.buffer[tlv.start] == SNMPDTYPE_INTEGER) && (request_msg.buffer[tlv.vstart] == SNMP_V1)))
+-		return -1;
++	if (request_msg.buffer[tlv.start] != SNMPDTYPE_INTEGER) return -1;
++	if ((request_msg.buffer[tlv.vstart] != SNMP_V1) && (request_msg.buffer[tlv.vstart] != SNMP_V2C)) return -1;
++	snmp_version = request_msg.buffer[tlv.vstart];
+ 
+ 	seglen = tlv.nstart - tlv.start;
+ 	size += seglen;
+@@ -879,12 +1050,119 @@ int32_t snmp_sendTrap(uint8_t * managerIP, uint8_t * agentIP, int8_t* community,
+ 	{
+ 		socket(SOCK_SNMP_TRAP, Sn_MR_UDP, PORT_SNMP_TRAP, 0);
+ 		sendto(SOCK_SNMP_TRAP, packet_trap, packet_index, managerIP, PORT_SNMP_TRAP);
+-		
++
+ 		close(SOCK_SNMP_TRAP);
+ 		return 0;
+ 	}
+ }
+ 
++
++// Standard SNMPv2c notification OID prefix: 1.3.6.1.6.3.1.1.5.x
++static const uint8_t snmpv2_std_trap_prefix[] = {0x2b, 0x06, 0x01, 0x06, 0x03, 0x01, 0x01, 0x05};
++// sysUpTime.0  : 1.3.6.1.2.1.1.3.0
++static const uint8_t oid_sysUpTime[]  = {0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x03, 0x00};
++// snmpTrapOID.0: 1.3.6.1.6.3.1.1.4.1.0
++static const uint8_t oid_snmpTrapOID[] = {0x2b, 0x06, 0x01, 0x06, 0x03, 0x01, 0x01, 0x04, 0x01, 0x00};
++
++int32_t snmp_sendTrapV2c(uint8_t *managerIP, uint8_t *agentIP, int8_t *community,
++                          dataEntryType enterprise_oid, uint32_t genericTrap,
++                          uint32_t specificTrap, uint32_t va_count, ...)
++{
++	uint32_t i;
++	int32_t  packet_index = 0;
++	int32_t  pb_outer, pb_pdu, pb_varbinds;
++	va_list  ap;
++	uint32_t length_buff = 0;
++	uint32_t uptime = 0;
++	uint8_t  uptime_len = 4;
++	uint8_t  trap_oid[MAX_OID];
++	uint8_t  trap_oid_len;
++
++	// Derive the SNMPv2 notification OID
++	if (genericTrap <= 5)
++	{
++		memcpy(trap_oid, snmpv2_std_trap_prefix, sizeof(snmpv2_std_trap_prefix));
++		trap_oid[sizeof(snmpv2_std_trap_prefix)] = (uint8_t)(genericTrap + 1);
++		trap_oid_len = (uint8_t)(sizeof(snmpv2_std_trap_prefix) + 1);
++	}
++	else
++	{
++		trap_oid_len = enterprise_oid.oidlen;
++		memcpy(trap_oid, enterprise_oid.oid, trap_oid_len);
++	}
++
++	// Outer SEQUENCE
++	packet_trap[packet_index++] = 0x30;
++	packet_trap[packet_index] = 0xff;
++	pb_outer = packet_index++;
++
++	// Version = 1 (SNMPv2c)
++	packet_trap[packet_index++] = 0x02;
++	packet_trap[packet_index++] = 0x01;
++	packet_trap[packet_index++] = SNMP_V2C;
++
++	// Community
++	packet_trap[packet_index++] = 0x04;
++	packet_trap[packet_index++] = (uint8_t)strlen((char const*)community);
++	memcpy(&packet_trap[packet_index], community, strlen((char const*)community));
++	packet_index += (uint8_t)strlen((char const*)community);
++
++	// SNMPv2-Trap-PDU (0xa7)
++	packet_trap[packet_index++] = SNMPV2_TRAP_PDU;
++	packet_trap[packet_index] = 0xff;
++	pb_pdu = packet_index++;
++
++	// request-id, error-status, error-index all zero
++	packet_trap[packet_index++] = 0x02; packet_trap[packet_index++] = 0x01; packet_trap[packet_index++] = 0x00;
++	packet_trap[packet_index++] = 0x02; packet_trap[packet_index++] = 0x01; packet_trap[packet_index++] = 0x00;
++	packet_trap[packet_index++] = 0x02; packet_trap[packet_index++] = 0x01; packet_trap[packet_index++] = 0x00;
++
++	// VarBindings SEQUENCE OF
++	packet_trap[packet_index++] = 0x30;
++	packet_trap[packet_index] = 0xff;
++	pb_varbinds = packet_index++;
++	int32_t vb_start = packet_index;
++
++	// VarBind 1: sysUpTime.0 = TimeTicks
++	currentUptime(&uptime, &uptime_len);
++	uint32_t uptime_be = HTONL(uptime);
++	packet_trap[packet_index++] = 0x30;
++	packet_trap[packet_index++] = 2 + (uint8_t)sizeof(oid_sysUpTime) + 2 + 4;
++	packet_trap[packet_index++] = 0x06; packet_trap[packet_index++] = (uint8_t)sizeof(oid_sysUpTime);
++	memcpy(&packet_trap[packet_index], oid_sysUpTime, sizeof(oid_sysUpTime)); packet_index += sizeof(oid_sysUpTime);
++	packet_trap[packet_index++] = SNMPDTYPE_TIME_TICKS; packet_trap[packet_index++] = 0x04;
++	memcpy(&packet_trap[packet_index], &uptime_be, 4); packet_index += 4;
++
++	// VarBind 2: snmpTrapOID.0 = OID
++	packet_trap[packet_index++] = 0x30;
++	packet_trap[packet_index++] = 2 + (uint8_t)sizeof(oid_snmpTrapOID) + 2 + trap_oid_len;
++	packet_trap[packet_index++] = 0x06; packet_trap[packet_index++] = (uint8_t)sizeof(oid_snmpTrapOID);
++	memcpy(&packet_trap[packet_index], oid_snmpTrapOID, sizeof(oid_snmpTrapOID)); packet_index += sizeof(oid_snmpTrapOID);
++	packet_trap[packet_index++] = 0x06; packet_trap[packet_index++] = trap_oid_len;
++	memcpy(&packet_trap[packet_index], trap_oid, trap_oid_len); packet_index += trap_oid_len;
++
++	// Additional VarBinds from caller
++	va_start(ap, va_count);
++	for (i = 0; i < va_count; i++)
++	{
++		dataEntryType *vb = va_arg(ap, dataEntryType*);
++		makeTrapVariableBindings(vb, &packet_trap[packet_index], &length_buff);
++		packet_index += length_buff;
++	}
++	va_end(ap);
++
++	// Fill deferred lengths
++	packet_trap[pb_varbinds] = (uint8_t)(packet_index - vb_start);
++	packet_trap[pb_pdu]      = (uint8_t)(packet_index - (pb_pdu + 1));
++	packet_trap[pb_outer]    = (uint8_t)(packet_index - 2);
++
++	socket(SOCK_SNMP_TRAP, Sn_MR_UDP, PORT_SNMP_TRAP, 0);
++	sendto(SOCK_SNMP_TRAP, packet_trap, packet_index, managerIP, PORT_SNMP_TRAP);
++	close(SOCK_SNMP_TRAP);
++	return 0;
++}
++
++
+ #ifdef _SNMP_DEBUG_
+ void dumpCode(uint8_t* header, uint8_t* tail, uint8_t *buff, int32_t len)
+ {
+diff --git a/Internet/SNMP/snmp.h b/Internet/SNMP/snmp.h
+index 02c83fd..7071193 100644
+--- a/Internet/SNMP/snmp.h
++++ b/Internet/SNMP/snmp.h
+@@ -12,6 +12,7 @@ extern "C" {
+ #define PORT_SNMP_TRAP				162
+ 
+ #define SNMP_V1						0
++#define SNMP_V2C					1
+ 
+ #define MAX_OID						12
+ #define MAX_STRING					64
+@@ -29,16 +30,29 @@ extern "C" {
+ #define NO_SUCH_NAME				2
+ #define BAD_VALUE					3
+ 
+-// SNMPv1 Commands
++// SNMPv2c Error codes
++#define NO_ACCESS					6
++#define WRONG_TYPE					7
++#define WRONG_LENGTH				8
++#define WRONG_VALUE					10
++#define NO_CREATION					11
++#define INCONSISTENT_VALUE			12
++#define NOT_WRITABLE				17
++#define INCONSISTENT_NAME			18
++
++// SNMP Commands (v1 + v2c)
+ #define GET_REQUEST					0xa0
+ #define GET_NEXT_REQUEST			0xa1
+ #define GET_RESPONSE				0xa2
+ #define SET_REQUEST					0xa3
++#define GET_BULK_REQUEST			0xa5
++#define INFORM_REQUEST				0xa6
++#define SNMPV2_TRAP_PDU				0xa7
+ 
+-// Macros: SNMPv1 request validation checker
+-#define VALID_REQUEST(x)			((x == GET_REQUEST) || (x == GET_NEXT_REQUEST) || (x == SET_REQUEST))
++// Macros: SNMP request validation checker
++#define VALID_REQUEST(x)			((x)==GET_REQUEST || (x)==GET_NEXT_REQUEST || (x)==SET_REQUEST || (x)==GET_BULK_REQUEST)
+ 
+-// SNMPv1 Return Types
++// SNMP Return Types
+ #define SNMPDTYPE_INTEGER			0x02
+ #define SNMPDTYPE_OCTET_STRING		0x04
+ #define SNMPDTYPE_NULL_ITEM			0x05
+@@ -50,6 +64,12 @@ extern "C" {
+ #define SNMPDTYPE_GAUGE  			0x42
+ #define SNMPDTYPE_TIME_TICKS		0x43
+ #define SNMPDTYPE_OPAQUE			0x44
++#define SNMPDTYPE_COUNTER64			0x46
++
++// SNMPv2c Exception types (returned in VarBind when value unavailable)
++#define SNMPDTYPE_NO_SUCH_OBJECT	0x80
++#define SNMPDTYPE_NO_SUCH_INSTANCE	0x81
++#define SNMPDTYPE_END_OF_MIB_VIEW	0x82
+ 
+ // SNMP Trap: Standard Trap Types (Generic)
+ #define SNMPTRAP_COLDSTART			0x00	// Generic trap-type 0: Cold Start
+@@ -109,6 +129,7 @@ typedef struct {
+ void snmpd_init(uint8_t * managerIP, uint8_t * agentIP, uint8_t sn_agent, uint8_t sn_trap);
+ int32_t snmpd_run(void);
+ int32_t snmp_sendTrap(uint8_t * managerIP, uint8_t * agentIP, int8_t* community, dataEntryType enterprise_oid, uint32_t genericTrap, uint32_t specificTrap, uint32_t va_count, ...);
++int32_t snmp_sendTrapV2c(uint8_t * managerIP, uint8_t * agentIP, int8_t* community, dataEntryType enterprise_oid, uint32_t genericTrap, uint32_t specificTrap, uint32_t va_count, ...);
+ 
+ // SNMP Time handler functions
+ void SNMP_time_handler(void);
 diff --git a/Internet/SNMP/snmp_custom.c b/Internet/SNMP/snmp_custom.c
 index 68590c7..5dcea7e 100644
 --- a/Internet/SNMP/snmp_custom.c
@@ -56,43 +484,43 @@ index 68590c7..5dcea7e 100644
 -	SNMPDTYPE_OCTET_STRING, 30, {"WIZnet Embedded SNMP Agent"},
 +	SNMPDTYPE_OCTET_STRING, 30, {"W55RP20-S2E SNMP Agent"},
  	NULL, NULL},
-
+ 
  	// SysObjectID Entry
  	{8, {0x2b, 6, 1, 2, 1, 1, 2, 0},
 -	SNMPDTYPE_OBJ_ID, 8, {"\x2b\x06\x01\x02\x01\x01\x02\x00"},
 +	SNMPDTYPE_OBJ_ID, 0x0a, {"\x2b\x06\x01\x04\x01\x81\x9b\x19\x01\x00"},
  	NULL, NULL},
-
+ 
  	// SysUptime Entry
 @@ -35,17 +35,17 @@ dataEntryType snmpData[] =
-
+ 
  	// sysContact Entry
  	{8, {0x2b, 6, 1, 2, 1, 1, 4, 0},
 -	SNMPDTYPE_OCTET_STRING, 30, {"http://www.wizwiki.net/forum"},
 +	SNMPDTYPE_OCTET_STRING, 30, {"WIZnet"},
  	NULL, NULL},
-
+ 
  	// sysName Entry
  	{8, {0x2b, 6, 1, 2, 1, 1, 5, 0},
 -	SNMPDTYPE_OCTET_STRING, 30, {"http://www.wiznet.co.kr"},
 +	SNMPDTYPE_OCTET_STRING, 30, {"W55RP20-S2E"},
  	NULL, NULL},
-
+ 
  	// Location Entry
  	{8, {0x2b, 6, 1, 2, 1, 1, 6, 0},
 -	SNMPDTYPE_OCTET_STRING, 30, {"4F Humax Village"},
 +	SNMPDTYPE_OCTET_STRING, 30, {"Unspecified"},
  	NULL, NULL},
-
+ 
  	// SysServices
 @@ -95,8 +95,8 @@ const int32_t maxData = (sizeof(snmpData) / sizeof(dataEntryType));
-
+ 
  void initTable()
  {
 -	// Example integer value for [OID 1.3.6.1.2.1.1.7.0]
 -	snmpData[6].u.intval = -5;
 +	// sysServices: datalink + internet + applications
 +	snmpData[6].u.intval = 70;
-
+ 
  }
-
+ 

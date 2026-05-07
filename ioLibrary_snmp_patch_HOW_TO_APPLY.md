@@ -35,12 +35,15 @@ cd W55RP20-S2E_SNMP_HTTPS_TEST
 ```bash
 cd libraries/ioLibrary_Driver
 git checkout b981401
+cd ..
 ```
 
 ### 3. 패치 적용
 
+`libraries/` 디렉토리에서 실행한다.
+
 ```bash
-git apply ../../ioLibrary_snmp_patch.patch
+git apply ../ioLibrary_snmp_patch.patch
 ```
 
 ### 4. 적용 확인
@@ -65,7 +68,7 @@ Internet/SNMP/snmp_custom.c |  8 ++++----
 베이스 커밋이 다를 경우 아래 옵션으로 강제 적용을 시도할 수 있다.
 
 ```bash
-git apply --reject ../../ioLibrary_snmp_patch.patch
+git apply --reject ../ioLibrary_snmp_patch.patch
 ```
 
 `.rej` 파일이 생성되며 충돌 부분을 수동으로 병합해야 한다.
@@ -73,7 +76,7 @@ git apply --reject ../../ioLibrary_snmp_patch.patch
 ### 적용 전 미리 확인
 
 ```bash
-git apply --check ../../ioLibrary_snmp_patch.patch
+git apply --check ../ioLibrary_snmp_patch.patch
 ```
 
 오류 없이 완료되면 실제로 적용해도 안전하다.
