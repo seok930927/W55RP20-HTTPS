@@ -155,7 +155,6 @@ static void set_W5X00_NetTimeout(void) {
 static void set_minimal_runtime_config(void) {
     DevConfig *dev_config = get_DevConfig_pointer();
 
-    dev_config->network_option.dhcp_use = ENABLE;
     dev_config->network_connection.working_mode = TCP_SERVER_MODE;
     dev_config->network_connection.dns_use = DISABLE;
 }

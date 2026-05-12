@@ -43,6 +43,10 @@ body {
     font-size: 24px;
     font-weight: bold;
     color: #4a4a4a;
+    cursor: pointer;
+}
+.menu li:hover {
+    background: #e8f0f7;
 }
 .menu li.active {
     background: #d6e6f4;
@@ -94,19 +98,28 @@ th {
     font-size: 22px;
     font-weight: bold;
 }
+.btn-save {
+    font-size: 22px;
+    padding: 8px 28px;
+    background: #0f5b87;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    border-radius: 4px;
+}
+.btn-save:hover { background: #0a3f60; }
+.ip-input {
+    font-size: 24px;
+    width: 200px;
+    padding: 4px 8px;
+    border: 1px solid #7e8d98;
+    text-align: center;
+}
 @media (max-width: 900px) {
-    .page {
-        flex-direction: column;
-    }
-    .sidebar {
-        width: 100%;
-    }
-    .menu li, .content-header, .section-title, th, td, .footer {
-        font-size: 16px;
-    }
-    .menu-title {
-        font-size: 18px;
-    }
+    .page { flex-direction: column; }
+    .sidebar { width: 100%; }
+    .menu li, .content-header, .section-title, th, td, .footer { font-size: 16px; }
+    .menu-title { font-size: 18px; }
 }
 </style>
 </head>
@@ -115,53 +128,146 @@ th {
     <aside class="sidebar">
         <div class="menu-title">현재상태</div>
         <ul class="menu">
-            <li class="active">온습도및입력</li>
+            <li id="menu-sensor" class="active" onclick="showTab('sensor')">온습도및입력</li>
             <li>통신데이터</li>
             <li>네트워크환경</li>
-            <li>환경설정</li>
+            <li id="menu-config" onclick="showTab('config')">환경설정</li>
         </ul>
     </aside>
 
     <main class="content">
-        <div class="content-header">[ 온습도 센서 및 입출력데이터 ]</div>
+        <!-- 센서 탭 -->
+        <div id="tab-sensor">
+            <div class="content-header">[ 온습도 센서 및 입출력데이터 ]</div>
 
-        <section class="section">
-            <div class="section-title">온,습도센서 계측값</div>
-            <table>
-                <tr><th>온도 #1</th><td>0.0 ℃</td><th>습도 #1</th><td>0.0 %</td><th>경보 #1</th><td>2</td></tr>
-                <tr><th>온도 #2</th><td>0.0 ℃</td><th>습도 #2</th><td>0.0 %</td><th>경보 #2</th><td>2</td></tr>
-                <tr><th>온도 #3</th><td>0.0 ℃</td><th>습도 #3</th><td>0.0 %</td><th>경보 #3</th><td>2</td></tr>
-                <tr><th>온도 #4</th><td>0.0 ℃</td><th>습도 #4</th><td>0.0 %</td><th>경보 #4</th><td>2</td></tr>
-                <tr><th>온도 #5</th><td>0.0 ℃</td><th>습도 #5</th><td>0.0 %</td><th>경보 #5</th><td>0</td></tr>
-                <tr><th>온도 #6</th><td>0.0 ℃</td><th>습도 #6</th><td>0.0 %</td><th>경보 #6</th><td>0</td></tr>
-                <tr><th>온도 #7</th><td>0.0 ℃</td><th>습도 #7</th><td>0.0 %</td><th>경보 #7</th><td>0</td></tr>
-                <tr><th>온도 #8</th><td>0.0 ℃</td><th>습도 #8</th><td>0.0 %</td><th>경보 #8</th><td>0</td></tr>
-            </table>
-        </section>
+            <section class="section">
+                <div class="section-title">온,습도센서 계측값</div>
+                <table>
+                    <tr><th>온도 #1</th><td id="t1">0.0 ℃</td><th>습도 #1</th><td id="h1">0.0 %</td><th>경보 #1</th><td id="a1">-</td></tr>
+                    <tr><th>온도 #2</th><td id="t2">0.0 ℃</td><th>습도 #2</th><td id="h2">0.0 %</td><th>경보 #2</th><td id="a2">-</td></tr>
+                    <tr><th>온도 #3</th><td id="t3">0.0 ℃</td><th>습도 #3</th><td id="h3">0.0 %</td><th>경보 #3</th><td id="a3">-</td></tr>
+                    <tr><th>온도 #4</th><td id="t4">0.0 ℃</td><th>습도 #4</th><td id="h4">0.0 %</td><th>경보 #4</th><td id="a4">-</td></tr>
+                    <tr><th>온도 #5</th><td id="t5">0.0 ℃</td><th>습도 #5</th><td id="h5">0.0 %</td><th>경보 #5</th><td id="a5">-</td></tr>
+                    <tr><th>온도 #6</th><td id="t6">0.0 ℃</td><th>습도 #6</th><td id="h6">0.0 %</td><th>경보 #6</th><td id="a6">-</td></tr>
+                    <tr><th>온도 #7</th><td id="t7">0.0 ℃</td><th>습도 #7</th><td id="h7">0.0 %</td><th>경보 #7</th><td id="a7">-</td></tr>
+                    <tr><th>온도 #8</th><td id="t8">0.0 ℃</td><th>습도 #8</th><td id="h8">0.0 %</td><th>경보 #8</th><td id="a8">-</td></tr>
+                </table>
+            </section>
 
-        <section class="section">
-            <div class="section-title">센서 상태 ( 1 : 정상, 2 : 경보 )</div>
-            <table>
-                <tr><th>센서 1호기 상태</th><td>2</td><th>센서 2호기 상태</th><td>2</td></tr>
-                <tr><th>센서 3호기 상태</th><td>2</td><th>센서 4호기 상태</th><td>2</td></tr>
-                <tr><th>센서 5호기 상태</th><td>2</td><th>센서 6호기 상태</th><td>2</td></tr>
-                <tr><th>센서 7호기 상태</th><td>2</td><th>센서 8호기 상태</th><td>2</td></tr>
-                <tr><th>센서 9호기 상태</th><td>2</td><th>센서 10호기 상태</th><td>2</td></tr>
-                <tr><th>센서 11호기 상태</th><td>2</td><th>센서 12호기 상태</th><td>2</td></tr>
-            </table>
-        </section>
+            <section class="section">
+                <div class="section-title">센서 상태 ( 1 : 정상, 2 : 경보 )</div>
+                <table>
+                    <tr><th>센서 1호기 상태</th><td id="s1">-</td><th>센서 2호기 상태</th><td id="s2">-</td></tr>
+                    <tr><th>센서 3호기 상태</th><td id="s3">-</td><th>센서 4호기 상태</th><td id="s4">-</td></tr>
+                    <tr><th>센서 5호기 상태</th><td id="s5">-</td><th>센서 6호기 상태</th><td id="s6">-</td></tr>
+                    <tr><th>센서 7호기 상태</th><td id="s7">-</td><th>센서 8호기 상태</th><td id="s8">-</td></tr>
+                    <tr><th>센서 9호기 상태</th><td id="s9">-</td><th>센서 10호기 상태</th><td id="s10">-</td></tr>
+                    <tr><th>센서 11호기 상태</th><td id="s11">-</td><th>센서 12호기 상태</th><td id="s12">-</td></tr>
+                </table>
+            </section>
 
-        <section class="section">
-            <div class="section-title">데이터 수신 바이트</div>
-            <table>
-                <tr><th>통신상태</th><td>2</td><th>0:정상,2:이상</th><td>-</td></tr>
-                <tr><th>수신체크섬</th><td>0</td><th>계산체크섬</th><td>0</td></tr>
-                <tr><th>통신체크</th><td>0</td><th>통신클래그</th><td>0</td></tr>
-            </table>
-        </section>
+            <section class="section">
+                <div class="section-title">데이터 수신 바이트</div>
+                <table>
+                    <tr><th>통신상태</th><td id="comm_status">-</td><th>0:정상,2:이상</th><td>-</td></tr>
+                    <tr><th>수신체크섬</th><td id="recv_cs">-</td><th>계산체크섬</th><td id="calc_cs">-</td></tr>
+                    <tr><th>통신체크</th><td id="comm_check">-</td><th>통신플래그</th><td id="comm_flag">-</td></tr>
+                </table>
+            </section>
 
-        <div class="footer">기본 화면 골격만 적용된 상태입니다.</div>
+            <div class="footer">기본 화면 골격만 적용된 상태입니다.</div>
+        </div>
+
+        <!-- 환경설정 탭 -->
+        <div id="tab-config" style="display:none">
+            <div class="content-header">[ 환경설정 ]</div>
+
+            <section class="section">
+                <div class="section-title">SNMP 수신가능 IP (0.0.0.0=전체허용)</div>
+                <table>
+                    <tr>
+                        <th>수신가능 IP #1</th>
+                        <td><input type="text" id="allowed_ip0" class="ip-input" placeholder="0.0.0.0"></td>
+                        <th>수신가능 IP #2</th>
+                        <td><input type="text" id="allowed_ip1" class="ip-input" placeholder="0.0.0.0"></td>
+                    </tr>
+                </table>
+            </section>
+            <section class="section">
+                <div class="section-title">SNMP 트랩 수신 IP</div>
+                <table>
+                    <tr>
+                        <th>트랩 수신 IP #1</th>
+                        <td><input type="text" id="trap_ip0" class="ip-input" placeholder="0.0.0.0"></td>
+                        <th>트랩 수신 IP #2</th>
+                        <td><input type="text" id="trap_ip1" class="ip-input" placeholder="0.0.0.0"></td>
+                    </tr>
+                </table>
+                <div style="text-align:center; padding:14px">
+                    <button class="btn-save" onclick="saveConfig()">저장</button>
+                    <span id="save_status" style="font-size:20px; margin-left:14px; color:#0f5b87"></span>
+                </div>
+            </section>
+        </div>
     </main>
 </div>
+<script>
+function fT(v){return(v/10).toFixed(1)+' ℃';}
+function fH(v){return(v/10).toFixed(1)+' %';}
+function upd(d){
+    for(var i=1;i<=8;i++){
+        document.getElementById('t'+i).textContent=fT(d.temp[i-1]);
+        document.getElementById('h'+i).textContent=fH(d.humid[i-1]);
+        document.getElementById('a'+i).textContent=d.alarm[i-1];
+    }
+    for(var i=1;i<=12;i++)document.getElementById('s'+i).textContent=d.sensor[i-1];
+    document.getElementById('comm_status').textContent=d.comm.status;
+    document.getElementById('recv_cs').textContent=d.comm.recv_cs;
+    document.getElementById('calc_cs').textContent=d.comm.calc_cs;
+    document.getElementById('comm_check').textContent=d.comm.check;
+    document.getElementById('comm_flag').textContent=d.comm.flag;
+}
+function poll(){fetch('/api/sensors').then(function(r){return r.json();}).then(upd).catch(function(){});}
+setInterval(poll,3000);
+poll();
+
+function showTab(tab){
+    document.getElementById('tab-sensor').style.display=(tab==='sensor')?'':'none';
+    document.getElementById('tab-config').style.display=(tab==='config')?'':'none';
+    document.getElementById('menu-sensor').className=(tab==='sensor')?'active':'';
+    document.getElementById('menu-config').className=(tab==='config')?'active':'';
+    if(tab==='config')loadConfig();
+}
+var IP_RE=/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+function loadConfig(){
+    fetch('/api/config').then(function(r){return r.json();}).then(function(d){
+        document.getElementById('allowed_ip0').value=d.allowed_ip0;
+        document.getElementById('allowed_ip1').value=d.allowed_ip1;
+        document.getElementById('trap_ip0').value=d.trap_ip0;
+        document.getElementById('trap_ip1').value=d.trap_ip1;
+    }).catch(function(){});
+}
+function saveConfig(){
+    var ids=['allowed_ip0','allowed_ip1','trap_ip0','trap_ip1'];
+    var vals={};
+    var st=document.getElementById('save_status');
+    for(var i=0;i<ids.length;i++){
+        var v=document.getElementById(ids[i]).value.trim();
+        if(!IP_RE.test(v)){st.textContent='IP 형식 오류: '+ids[i];return;}
+        vals[ids[i]]=v;
+    }
+    st.textContent='저장 중...';
+    fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(vals)
+    }).then(function(r){return r.json();}).then(function(d){
+        document.getElementById('allowed_ip0').value=d.allowed_ip0;
+        document.getElementById('allowed_ip1').value=d.allowed_ip1;
+        document.getElementById('trap_ip0').value=d.trap_ip0;
+        document.getElementById('trap_ip1').value=d.trap_ip1;
+        st.textContent='저장 완료';
+        setTimeout(function(){st.textContent='';},3000);
+    }).catch(function(){st.textContent='저장 실패';});
+}
+</script>
 </body>
 </html>

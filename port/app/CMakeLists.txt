@@ -197,6 +197,7 @@ target_sources(APP_PLATFORM_FILES PUBLIC
         ${APP_PORT_DIR}/platform_handler/src/httpHandler.c
         ${APP_PORT_DIR}/platform_handler/src/netHandler.c
         ${APP_PORT_DIR}/platform_handler/src/snmpHandler.c
+        ${APP_PORT_DIR}/platform_handler/src/snmpBuffer.c
         ${APP_PORT_DIR}/platform_handler/src/spiHandler.c
         ${APP_PORT_DIR}/platform_handler/src/storageHandler.c
         ${APP_PORT_DIR}/platform_handler/src/timerHandler.c

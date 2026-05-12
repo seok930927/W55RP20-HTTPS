@@ -12,6 +12,7 @@
 #include "socket.h"
 #include "wizchip_conf.h"
 #include "WIZ5XXSR-RP_Debug.h"
+#include "ConfigData.h"
 
 #define SNMP_AGENT_POLL_MS      10
 #define SNMP_NET_WAIT_MS        200
@@ -39,6 +40,8 @@ static void snmp_agent_init(void) {
         close(SOCK_SNMP_AGENT);
     }
 
+    DevConfig *conf = get_DevConfig_pointer();
+    snmp_set_allowed_ips((const uint8_t (*)[4])conf->snmp_option.allowed_ip);
     snmpd_init(NULL, snmp_agent_ip, SOCK_SNMP_AGENT, SOCK_SNMP_AGENT);
     snmp_initialized = TRUE;
 
@@ -48,6 +51,10 @@ static void snmp_agent_init(void) {
              snmp_agent_ip[2],
              snmp_agent_ip[3],
              PORT_SNMP_AGENT);
+}
+
+void snmp_request_reinit(void) {
+    snmp_agent_close();
 }
 
 void snmp_agent_task(void *argument) {

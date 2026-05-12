@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(patch --version)",
+      "Bash(git apply *)",
+      "Bash(git checkout *)",
+      "Bash(Get-ChildItem -Path \"c:\\\\projects\\\\W55RP20-HTTPS\" -Recurse -Directory -Filter \"*SNMP*\")",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(cmake --build build)",
+      "Bash(git config *)",
+      "Bash(cat .gitattributes)",
+      "Bash(python tools/html_to_c_header.py)",
+      "PowerShell(Get-Command python3, python)",
+      "Bash(echo \"exit: $?\")",
+      "PowerShell(python --version)",
+      "PowerShell(python3 --version)",
+      "PowerShell(py --version)",
+      "Bash(git diff *)",
+      "Bash(cmake --build . --target App)"
+    ]
+  }
+}

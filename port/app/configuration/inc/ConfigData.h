@@ -145,6 +145,11 @@ struct __device_option {
 } __attribute__((packed));
 #endif
 
+struct __snmp_option {
+    uint8_t allowed_ip[2][4];
+    uint8_t trap_ip[2][4];
+} __attribute__((packed));
+
 struct __ssl_option {
     uint8_t root_ca_option;     //0: Verify_none / 1: Verify_option / 2: Verify_require
     uint8_t client_cert_enable;
@@ -183,6 +188,7 @@ typedef struct __DevConfig {
     struct __ssl_option ssl_option;
     struct __mqtt_option mqtt_option;
     struct __device_option device_option;
+    struct __snmp_option snmp_option;
     uint32_t devConfigVer;
 } __attribute__((packed)) DevConfig;
 

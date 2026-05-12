@@ -183,6 +183,7 @@ target_sources(SNMP_FILES PUBLIC
 target_include_directories(SNMP_FILES PUBLIC
         ${WIZNET_DIR}/Ethernet
         ${WIZNET_DIR}/Internet/SNMP
+        ${APP_PORT_DIR}/platform_handler/inc
         )
 
 target_link_libraries(SNMP_FILES PUBLIC

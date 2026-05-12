@@ -9,6 +9,9 @@
 #include "netHandler.h"
 #include "SSLInterface.h"
 #include "deviceHandler.h"
+#include "snmpBuffer.h"
+#include "ConfigData.h"
+#include "snmpHandler.h"
 
 #define HTTPS_SERVER_PORT 443
 #define HTTPS_RX_BUF_SIZE 1024
@@ -93,6 +96,123 @@ static int https_send_page(wiz_tls_context *tls_ctx) {
 
     PRT_SSL("HTTPS page send complete\r\n");
     return 0;
+}
+
+static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
+    static char json_body[800];
+    char header[128];
+    int n = 0;
+
+    n += snprintf(json_body + n, sizeof(json_body) - n,
+                  "{\"temp\":[%d,%d,%d,%d,%d,%d,%d,%d]",
+                  g_snmp_sensor.temperature[0], g_snmp_sensor.temperature[1],
+                  g_snmp_sensor.temperature[2], g_snmp_sensor.temperature[3],
+                  g_snmp_sensor.temperature[4], g_snmp_sensor.temperature[5],
+                  g_snmp_sensor.temperature[6], g_snmp_sensor.temperature[7]);
+    n += snprintf(json_body + n, sizeof(json_body) - n,
+                  ",\"humid\":[%u,%u,%u,%u,%u,%u,%u,%u]",
+                  g_snmp_sensor.humidity[0], g_snmp_sensor.humidity[1],
+                  g_snmp_sensor.humidity[2], g_snmp_sensor.humidity[3],
+                  g_snmp_sensor.humidity[4], g_snmp_sensor.humidity[5],
+                  g_snmp_sensor.humidity[6], g_snmp_sensor.humidity[7]);
+    n += snprintf(json_body + n, sizeof(json_body) - n,
+                  ",\"alarm\":[%u,%u,%u,%u,%u,%u,%u,%u]",
+                  g_snmp_sensor.alarm[0], g_snmp_sensor.alarm[1],
+                  g_snmp_sensor.alarm[2], g_snmp_sensor.alarm[3],
+                  g_snmp_sensor.alarm[4], g_snmp_sensor.alarm[5],
+                  g_snmp_sensor.alarm[6], g_snmp_sensor.alarm[7]);
+    n += snprintf(json_body + n, sizeof(json_body) - n,
+                  ",\"sensor\":[%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u]",
+                  g_snmp_sensor.sensor_status[0],  g_snmp_sensor.sensor_status[1],
+                  g_snmp_sensor.sensor_status[2],  g_snmp_sensor.sensor_status[3],
+                  g_snmp_sensor.sensor_status[4],  g_snmp_sensor.sensor_status[5],
+                  g_snmp_sensor.sensor_status[6],  g_snmp_sensor.sensor_status[7],
+                  g_snmp_sensor.sensor_status[8],  g_snmp_sensor.sensor_status[9],
+                  g_snmp_sensor.sensor_status[10], g_snmp_sensor.sensor_status[11]);
+    n += snprintf(json_body + n, sizeof(json_body) - n,
+                  ",\"comm\":{\"status\":%u,\"recv_cs\":%u,\"calc_cs\":%u,\"check\":%u,\"flag\":%u}}",
+                  g_snmp_sensor.comm_status,    g_snmp_sensor.recv_checksum,
+                  g_snmp_sensor.calc_checksum,  g_snmp_sensor.comm_check,
+                  g_snmp_sensor.comm_flag);
+
+    int header_len = snprintf(header, sizeof(header),
+                              "HTTP/1.1 200 OK\r\n"
+                              "Content-Type: application/json\r\n"
+                              "Content-Length: %d\r\n"
+                              "Connection: close\r\n"
+                              "\r\n", n);
+
+    if (https_write_all(tls_ctx, (const unsigned char *)header, (size_t)header_len) < 0) {
+        return -1;
+    }
+    return https_write_all(tls_ctx, (const unsigned char *)json_body, (size_t)n);
+}
+
+static int https_send_config_json(wiz_tls_context *tls_ctx) {
+    DevConfig *conf = get_DevConfig_pointer();
+    char body[192];
+    char header[128];
+    int n = snprintf(body, sizeof(body),
+                     "{\"allowed_ip0\":\"%u.%u.%u.%u\","
+                     "\"allowed_ip1\":\"%u.%u.%u.%u\","
+                     "\"trap_ip0\":\"%u.%u.%u.%u\","
+                     "\"trap_ip1\":\"%u.%u.%u.%u\"}",
+                     conf->snmp_option.allowed_ip[0][0], conf->snmp_option.allowed_ip[0][1],
+                     conf->snmp_option.allowed_ip[0][2], conf->snmp_option.allowed_ip[0][3],
+                     conf->snmp_option.allowed_ip[1][0], conf->snmp_option.allowed_ip[1][1],
+                     conf->snmp_option.allowed_ip[1][2], conf->snmp_option.allowed_ip[1][3],
+                     conf->snmp_option.trap_ip[0][0], conf->snmp_option.trap_ip[0][1],
+                     conf->snmp_option.trap_ip[0][2], conf->snmp_option.trap_ip[0][3],
+                     conf->snmp_option.trap_ip[1][0], conf->snmp_option.trap_ip[1][1],
+                     conf->snmp_option.trap_ip[1][2], conf->snmp_option.trap_ip[1][3]);
+    int hlen = snprintf(header, sizeof(header),
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n", n);
+    if (https_write_all(tls_ctx, (const unsigned char *)header, (size_t)hlen) < 0) {
+        return -1;
+    }
+    return https_write_all(tls_ctx, (const unsigned char *)body, (size_t)n);
+}
+
+static int https_handle_config_post(wiz_tls_context *tls_ctx, const char *rx_buf) {
+    DevConfig *conf = get_DevConfig_pointer();
+    const char *body = strstr(rx_buf, "\r\n\r\n");
+    static unsigned char post_extra_buf[256];
+    if (body) {
+        body += 4;
+        if (*body == '\0') {
+            int r = mbedtls_ssl_read(tls_ctx->ssl, post_extra_buf, sizeof(post_extra_buf) - 1);
+            if (r > 0) {
+                post_extra_buf[r] = '\0';
+                body = (const char *)post_extra_buf;
+            }
+        }
+        static const char *keys[4] = {
+            "\"allowed_ip0\":\"", "\"allowed_ip1\":\"",
+            "\"trap_ip0\":\"",    "\"trap_ip1\":\""
+        };
+        static const size_t klens[4] = { 15, 15, 12, 12 };
+        uint8_t changed = 0;
+        for (int k = 0; k < 4; k++) {
+            const char *p = strstr(body, keys[k]);
+            if (p) {
+                p += klens[k];
+                unsigned int a = 0, b = 0, c = 0, d = 0;
+                if (sscanf(p, "%u.%u.%u.%u", &a, &b, &c, &d) == 4) {
+                    uint8_t *ip = (k < 2)
+                                  ? conf->snmp_option.allowed_ip[k]
+                                  : conf->snmp_option.trap_ip[k - 2];
+                    ip[0] = (uint8_t)a; ip[1] = (uint8_t)b;
+                    ip[2] = (uint8_t)c; ip[3] = (uint8_t)d;
+                    changed = 1;
+                }
+            }
+        }
+        if (changed) {
+            save_DevConfig_to_storage();
+            snmp_request_reinit();
+        }
+    }
+    return https_send_config_json(tls_ctx);
 }
 
 static void https_close_session(uint8_t sock, wiz_tls_context *tls_ctx, uint8_t *tls_active) {
@@ -200,7 +320,18 @@ void http_webserver_task(void *argument) {
                     memset(https_rx_buf[i], 0, sizeof(https_rx_buf[i]));
                     ret = mbedtls_ssl_read(https_tls_ctx[i].ssl, https_rx_buf[i], sizeof(https_rx_buf[i]) - 1);
                     if (ret > 0) {
-                        if (https_send_page(&https_tls_ctx[i]) < 0) {
+                        const char *req = (const char *)https_rx_buf[i];
+                        int send_ok;
+                        if (strncmp(req, "GET /api/sensors", 16) == 0) {
+                            send_ok = https_send_sensor_json(&https_tls_ctx[i]) >= 0;
+                        } else if (strncmp(req, "GET /api/config", 15) == 0) {
+                            send_ok = https_send_config_json(&https_tls_ctx[i]) >= 0;
+                        } else if (strncmp(req, "POST /api/config", 16) == 0) {
+                            send_ok = https_handle_config_post(&https_tls_ctx[i], req) >= 0;
+                        } else {
+                            send_ok = https_send_page(&https_tls_ctx[i]) >= 0;
+                        }
+                        if (!send_ok) {
                             PRT_SSL("HTTPS socket[%d] response send failed\r\n", sock);
                             https_close_session(sock, &https_tls_ctx[i], &https_tls_active[i]);
                         } else {
