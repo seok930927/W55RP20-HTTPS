@@ -573,6 +573,12 @@ int wiz_tls_server_handshake(wiz_tls_context* tlsContext) {
             return -1;
         }
 
+        uint8_t sr = getSn_SR(sock);
+        if (sr == SOCK_CLOSED || sr == SOCK_CLOSE_WAIT) {
+            PRT_SSL(" failed\r\n  ! Socket closed during handshake sock=%d\r\n", sock);
+            return -1;
+        }
+
         if ((millis() - last_log_ms) >= 500) {
             PRT_SSL(" handshake pending ret=-0x%x sock=%d sr=0x%02x rx=%d\r\n",
                     -ret, sock, getSn_SR(sock), getSn_RX_RSR(sock));

@@ -16,7 +16,14 @@
       "PowerShell(python3 --version)",
       "PowerShell(py --version)",
       "Bash(git diff *)",
-      "Bash(cmake --build . --target App)"
+      "Bash(cmake --build . --target App)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(curl -s \"https://api.github.com/repos/seok930927/W55RP20-HTTPS-SERVER-AUTH/git/trees/main?recursive=1\")",
+      "Bash(python3 -c \"import sys,json; data=json.load\\(sys.stdin\\); [print\\(t['path']\\) for t in data.get\\('tree',[]\\) if t['type']=='blob']\")",
+      "PowerShell($r = Invoke-RestMethod \"https://api.github.com/repos/seok930927/W55RP20-HTTPS-SERVER-AUTH/git/trees/main?recursive=1\"; $r.tree | Where-Object { $_.type -eq \"blob\" } | Select-Object -ExpandProperty path)",
+      "Bash(py tools\\\\html_to_c_header.py port\\\\app\\\\html_file\\\\Web_page.html port\\\\app\\\\html_file\\\\Web_page.h)",
+      "Bash(py tools/html_to_c_header.py port/app/html_file/Web_page.html port/app/html_file/Web_page.h)"
     ]
   }
 }
