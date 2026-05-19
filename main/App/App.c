@@ -27,6 +27,7 @@
 #include "snmpHandler.h"
 #include "segcp.h"
 #include "sensor.h"
+#include "sensorUart.h"
 
 #include "w5x00_spi.h"
 
@@ -51,6 +52,9 @@
 
 #define SEGCP_TCP_TASK_STACK_SIZE 1024
 #define SEGCP_TCP_TASK_PRIORITY 51
+
+#define SENSOR_UART_TASK_STACK_SIZE 1024
+#define SENSOR_UART_TASK_PRIORITY 9
 
 #define HEAP_MONITOR_TASK_STACK_SIZE 1024
 #define HEAP_MONITOR_TASK_PRIORITY 6
@@ -200,22 +204,19 @@ void start_task(void *argument) {
     set_W5X00_NetTimeout();
     Timer_Configuration();
 
-    /* ── Sensor bank: 3-slot demo (TEST) ─────────────────────────────── */
+    /* ── Sensor bank: demo entries (TEST) ─────────────────────────────── */
+    // 200개 TEST용 센서 인스턴스 할당. 실제 제품에서는 UART/Modbus 등으로 동적 할당될 예정.
     sensor_init();
-    sensor_assign(0, TYPE_ID_TEMPERATURE, "Sensor 1");
-    sensor_assign(1, TYPE_ID_HUMIDITY,    "Sensor 2");
-    sensor_assign(2, TYPE_ID_STATUS,      "Door 1");
-    sensor_assign(3, TYPE_ID_STATUS,      "Door 1");
-    sensor_assign(4, TYPE_ID_STATUS,      "Door 1");
-    sensor_assign(5, TYPE_ID_STATUS,      "Door 1");
-    sensor_assign(6, TYPE_ID_STATUS,      "Door 1");
-    sensor_setValue(0, 256);   /* 25.6 °C */
-    sensor_setValue(1, 652);   /* 65.2 %RH */
-    sensor_setValue(2, 1);     /* Status = Normal */
-    sensor_setValue(3, 1);     /* Status = Normal */
-    sensor_setValue(4, 1);     /* Status = Normal */
-    sensor_setValue(5, 1);     /* Status = Normal */
-    sensor_setValue(6, 1);     /* Status = Normal */
+
+    for (uint8_t i = 0; i < 10; i++) {
+        char name[16];
+        snprintf(name, sizeof(name), "Sensor %d", i);
+        sensor_assign(i, TYPE_ID_TEMPERATURE, name);
+        sensor_setValue(i, 200 + i); // 20.0 °C ~ 20.9 °C
+    }
+
+    /* ── UART RX → sensor bank ingestion ─────────────────────────────── */
+    sensorUart_init();
 
     net_http_webserver_sem = xSemaphoreCreateCounting((unsigned portBASE_TYPE)0x7fffffff, (unsigned portBASE_TYPE)0);
     net_segcp_udp_sem = xSemaphoreCreateCounting((unsigned portBASE_TYPE)0x7fffffff, (unsigned portBASE_TYPE)0);
@@ -232,6 +233,7 @@ void start_task(void *argument) {
     xTaskCreate(snmp_agent_task, "SNMP_Agent_Task", SNMP_TASK_STACK_SIZE, NULL, SNMP_TASK_PRIORITY, NULL);
     xTaskCreate(segcp_udp_task, "SEGCP_udp_Task", SEGCP_UDP_TASK_STACK_SIZE, NULL, SEGCP_UDP_TASK_PRIORITY, NULL);
     xTaskCreate(segcp_tcp_task, "SEGCP_tcp_Task", SEGCP_TCP_TASK_STACK_SIZE, NULL, SEGCP_TCP_TASK_PRIORITY, NULL);
+    xTaskCreate(sensorUart_task, "Sensor_UART_Task", SENSOR_UART_TASK_STACK_SIZE, NULL, SENSOR_UART_TASK_PRIORITY, NULL);
     // xTaskCreate(heap_monitor_task, "Heap_Monitor_Task", HEAP_MONITOR_TASK_STACK_SIZE, NULL, HEAP_MONITOR_TASK_PRIORITY, NULL);
 #ifdef __USE_WATCHDOG__
     watchdog_enable(8388, 0);

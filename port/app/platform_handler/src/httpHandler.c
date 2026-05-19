@@ -276,32 +276,32 @@ static void get_form_field(const char *body, const char *name,
     --------------------------------------------------------------------- */
 static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
     /*
-        Slot-based JSON over the sensor.h API:
+        Index-based JSON over the sensor.h API:
         {
             "sensors":[
-                {"slot":0,"name":"...","type_id":1,"type":"Temperature",
+                {"index":0,"name":"...","type_id":1,"type":"Temperature",
                  "unit":"°C","scale":-1,"value":256,"label":null},
                 ...
             ],
             "comm":{"status":..,"recv_cs":..,"calc_cs":..,"check":..,"flag":..}
         }
-        Only enabled slots are emitted.
+        Only enabled entries are emitted.
     */
     /*
         body buffer sizing:
-          SENSOR_MAX (50) × ~130 B per slot worst case  ≈ 6500 B
-          + envelope ({"sensors":[…],"comm":{…}})        ≈  120 B
-          → 8192 B buffer with headroom.
+          SENSOR_MAX (200) × ~130 B per entry worst case  ≈ 26000 B
+          + envelope ({"sensors":[…],"comm":{…}})          ≈   120 B
+          → 32768 B buffer with headroom.
     */
-    static char body[8192];
+    static char body[32768];
     char header[128];
     int n = 0;
     int first = 1;
 
     n += snprintf(body + n, sizeof(body) - n, "{\"sensors\":[");
 
-    for (int s = 0; s < SENSOR_MAX; s++) {
-        const Sensor *sn = sensor_get((uint8_t)s);
+    for (int i = 0; i < SENSOR_MAX; i++) {
+        const Sensor *sn = sensor_get((uint8_t)i);
         if (sn == NULL || !sn->enabled) {
             continue;
         }
@@ -310,15 +310,15 @@ static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
             continue;
         }
 
-        int scale = sensor_effectiveScale((uint8_t)s);
-        const char *label = sensor_valueLabel((uint8_t)s);
+        int scale = sensor_effectiveScale((uint8_t)i);
+        const char *label = sensor_valueLabel((uint8_t)i);
 
         n += snprintf(body + n, sizeof(body) - n,
-                      "%s{\"slot\":%d,\"name\":\"%s\",\"type_id\":%u,"
+                      "%s{\"index\":%d,\"name\":\"%s\",\"type_id\":%u,"
                       "\"type\":\"%s\",\"unit\":\"%s\",\"scale\":%d,"
                       "\"value\":%ld,",
                       first ? "" : ",",
-                      s, sn->name, (unsigned)sn->type_id,
+                      i, sn->name, (unsigned)sn->type_id,
                       t->name, t->unit, scale,
                       (long)sn->value);
 

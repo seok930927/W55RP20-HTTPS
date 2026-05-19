@@ -11,8 +11,8 @@ extern "C" {
     Sensor object model
     --------------------------------------------------------------------------
     SensorType  : const class-like descriptor (Temperature / Humidity / RPM ...)
-    Sensor      : runtime instance bound to a slot, with user-given name
-                  + reference (type_id) to a SensorType
+    Sensor      : runtime instance bound to a table index, with user-given
+                  name + reference (type_id) to a SensorType
     Adding a new sensor type = add one SensorType definition in sensor.c.
     ========================================================================= */
 
@@ -20,11 +20,11 @@ extern "C" {
     Fixed-size sensor table.
     SENSOR_NAME_MAX = 11 → user names limited to 10 ASCII chars + null.
     Per Sensor struct = 11 + 1 + 1 + 1 + 4 + 4 = 22 B, padded to 24 B.
-    Total g_sensors[] = 50 × 24 = 1200 B static RAM.
-    Worst-case JSON per slot ≈ 130 B → 50 slots ≈ 6500 B (fits body[8192]).
+    Total g_sensors[] = 200 × 24 = 4800 B static RAM.
+    Worst-case JSON per entry ≈ 130 B → 200 entries ≈ 26 KB (fits body[32768]).
 */
 #define SENSOR_NAME_MAX     11
-#define SENSOR_MAX          50
+#define SENSOR_MAX          200
 
 /* ===== SensorType (const class-like descriptor) ======================= */
 
@@ -88,7 +88,7 @@ const SensorType *sensorType_byName(const char *name);
 typedef struct {
     char     name[SENSOR_NAME_MAX];  /* user-given, e.g. "Chamber A Temp" */
     uint8_t  type_id;                /* maps to one SensorType */
-    uint8_t  enabled;                /* 0 = slot unused */
+    uint8_t  enabled;                /* 0 = entry unused */
     int8_t   scale_override;         /* 0 = use SensorType.default_scale */
 
     int32_t  value;                  /* current raw value */
@@ -97,34 +97,34 @@ typedef struct {
 
 extern Sensor g_sensors[SENSOR_MAX];
 
-/* Clear all slots to disabled. Call once at boot before any sensor_assign. */
+/* Clear all entries to disabled. Call once at boot before any sensor_assign. */
 void sensor_init(void);
 
 /*
     Instance ops — return code:
       0  = OK
      -1  = invalid arg (NULL pointer)
-     -2  = slot out of range
+     -2  = index out of range
      -3  = unknown type_id (sensor_assign only)
 */
-int sensor_assign(uint8_t slot, uint8_t type_id, const char *name);
-int sensor_unassign(uint8_t slot);
-int sensor_setName(uint8_t slot, const char *name);
-int sensor_setValue(uint8_t slot, int32_t value);
-int sensor_getValue(uint8_t slot, int32_t *out);
+int sensor_assign(uint8_t index, uint8_t type_id, const char *name);
+int sensor_unassign(uint8_t index);
+int sensor_setName(uint8_t index, const char *name);
+int sensor_setValue(uint8_t index, int32_t value);
+int sensor_getValue(uint8_t index, int32_t *out);
 
-/* Read-only access (returns NULL if slot out of range). */
-const Sensor *sensor_get(uint8_t slot);
+/* Read-only access (returns NULL if index out of range). */
+const Sensor *sensor_get(uint8_t index);
 
 /* Effective scale = scale_override if non-zero, else SensorType.default_scale. */
-int sensor_effectiveScale(uint8_t slot);
+int sensor_effectiveScale(uint8_t index);
 
 /*  DISCRETE sensors only — returns the label matching the current value,
-    or NULL if the slot is not discrete or no label matches. */
-const char *sensor_valueLabel(uint8_t slot);
+    or NULL if the entry is not discrete or no label matches. */
+const char *sensor_valueLabel(uint8_t index);
 
-/* Iteration — returns slot index or -1 if not found. */
-int sensor_findByType(uint8_t type_id, uint8_t start_slot);
+/* Iteration — returns table index or -1 if not found. */
+int sensor_findByType(uint8_t type_id, uint8_t start_index);
 int sensor_findByName(const char *name);
 int sensor_countByType(uint8_t type_id);
 int sensor_countEnabled(void);

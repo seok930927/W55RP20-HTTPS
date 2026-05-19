@@ -13,37 +13,36 @@ body {
 }
 .page {
     display: flex;
-    gap: 16px;
+    flex-direction: column;
+    gap: 12px;
     max-width: 1200px;
     margin: 12px auto;
     padding: 0 12px 12px;
     box-sizing: border-box;
 }
-.sidebar {
-    width: 220px;
+.topnav {
     background: #f3f3f3;
     border: 1px solid #8ea0ad;
-}
-.menu-title {
-    padding: 14px 16px;
-    font-size: 24px;
-    font-weight: bold;
-    color: #12466d;
-    border-bottom: 1px solid #8ea0ad;
-    background: linear-gradient(#eef4f8, #dce8ef);
 }
 .menu {
     list-style: none;
     margin: 0;
-    padding: 10px 0;
+    padding: 0;
+    display: flex;
+    flex-direction: row;
 }
 .menu li {
-    padding: 12px 18px;
-    border-top: 1px solid #cdd6dc;
-    font-size: 24px;
+    flex: 1;
+    padding: 14px 18px;
+    border-right: 1px solid #cdd6dc;
+    font-size: 22px;
     font-weight: bold;
     color: #4a4a4a;
     cursor: pointer;
+    text-align: center;
+}
+.menu li:last-child {
+    border-right: none;
 }
 .menu li:hover {
     background: #e8f0f7;
@@ -91,6 +90,15 @@ th, td {
 }
 th {
     background: #f0f0f0;
+}
+/* 3-up sensor grid table — smaller cells to fit 9 columns */
+.sensor-table th, .sensor-table td {
+    font-size: 18px;
+    padding: 6px 4px;
+}
+.sensor-table .col-idx {
+    width: 50px;
+    color: #777;
 }
 .footer {
     padding: 10px 16px 18px;
@@ -185,10 +193,11 @@ th {
 }
 .btn-cancel:hover { background: #666; }
 @media (max-width: 900px) {
-    .page { flex-direction: column; }
-    .sidebar { width: 100%; }
+    .menu { flex-direction: column; }
+    .menu li { border-right: none; border-bottom: 1px solid #cdd6dc; }
+    .menu li:last-child { border-bottom: none; }
     .menu li, .content-header, .section-title, th, td, .footer { font-size: 16px; }
-    .menu-title { font-size: 18px; }
+    .sensor-table th, .sensor-table td { font-size: 14px; padding: 4px 2px; }
 }
 </style>
 </head>
@@ -210,15 +219,14 @@ th {
 </div>
 
 <div class="page">
-    <aside class="sidebar">
-        <div class="menu-title">현재상태</div>
+    <nav class="topnav">
         <ul class="menu">
             <li id="menu-sensor" class="active" onclick="showTab('sensor')">온습도및입력</li>
             <li>통신데이터</li>
             <li>네트워크환경</li>
             <li id="menu-config" onclick="showTab('config')">환경설정</li>
         </ul>
-    </aside>
+    </nav>
 
     <main class="content">
         <!-- 센서 탭 -->
@@ -227,13 +235,17 @@ th {
 
             <section class="section">
                 <div class="section-title">활성 센서</div>
-                <table>
+                <table class="sensor-table">
                     <thead>
-                        <tr><th style="width:60px">슬롯</th><th>이름</th><th style="width:140px">종류</th><th style="width:160px">값</th></tr>
+                        <tr>
+                            <th class="col-idx">Idx</th><th>이름</th><th>값</th>
+                            <th class="col-idx">Idx</th><th>이름</th><th>값</th>
+                            <th class="col-idx">Idx</th><th>이름</th><th>값</th>
+                        </tr>
                     </thead>
                     <tbody id="sensor-rows"></tbody>
                 </table>
-                <div id="sensor-empty" style="text-align:center;padding:20px;color:#888;display:none">활성 슬롯이 없습니다</div>
+                <div id="sensor-empty" style="text-align:center;padding:20px;color:#888;display:none">활성 항목이 없습니다</div>
             </section>
 
             <section class="section">
@@ -331,9 +343,18 @@ function upd(d){
     }else{
         empty.style.display='none';
         var html='';
-        d.sensors.forEach(function(s){
-            html += '<tr><td>'+s.slot+'</td><th>'+escHtml(s.name)+'</th><td>'+escHtml(s.type)+'</td><td>'+fmtValue(s)+'</td></tr>';
-        });
+        for(var i=0; i<d.sensors.length; i+=3){
+            html += '<tr>';
+            for(var k=0; k<3; k++){
+                var s = d.sensors[i+k];
+                if(s){
+                    html += '<td class="col-idx">'+s.index+'</td><th>'+escHtml(s.name)+'</th><td>'+fmtValue(s)+'</td>';
+                } else {
+                    html += '<td class="col-idx"></td><td></td><td></td>';
+                }
+            }
+            html += '</tr>';
+        }
         tbody.innerHTML=html;
     }
     document.getElementById('comm_status').textContent=d.comm.status;

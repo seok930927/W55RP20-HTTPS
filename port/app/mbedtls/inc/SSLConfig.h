@@ -48,14 +48,19 @@
 #define MBEDTLS_GENPRIME
 
 /*
-    TLS record buffers — default 16 KB each is overkill for this device.
-    Our largest outbound payload is the 17 KB HTML page, already sent in
-    512 B chunks via mbedtls_ssl_write (see HTTPS_TX_CHUNK_SIZE). mbedTLS
-    fragments any larger ssl_write call into 2 KB records automatically.
-    Per-context heap saved vs. default: (16384 - 2048) * 2 = 28 KB.
+    TLS record buffers.
+      IN  — HTTP requests are small (<1 KB), 2 KB is plenty.
+      OUT — JSON responses can hit ~22 KB with 200 sensors. With 2 KB
+            records the response splits into 11 frames; each frame costs
+            an AES-256-GCM encrypt + W5500 SPI send. 8 KB OUT cuts that
+            to ~3 frames → ~3× faster transmission, keeps polling fast
+            enough to not collide with other handshakes.
+    Per-context heap impact vs. mbedTLS default (16 KB each):
+      IN  : -14 KB / context
+      OUT :  -8 KB / context
 */
 #define MBEDTLS_SSL_IN_CONTENT_LEN              2048
-#define MBEDTLS_SSL_OUT_CONTENT_LEN             2048
+#define MBEDTLS_SSL_OUT_CONTENT_LEN             8192
 
 #define MBEDTLS_PLATFORM_C
 #define MBEDTLS_PLATFORM_MEMORY

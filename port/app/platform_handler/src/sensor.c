@@ -185,8 +185,8 @@ void sensor_init(void) {
     memset(g_sensors, 0, sizeof(g_sensors));
 }
 
-int sensor_assign(uint8_t slot, uint8_t type_id, const char *name) {
-    if (slot >= SENSOR_MAX) {
+int sensor_assign(uint8_t index, uint8_t type_id, const char *name) {
+    if (index >= SENSOR_MAX) {
         return -2;
     }
     if (sensorType_get(type_id) == NULL) {
@@ -196,81 +196,81 @@ int sensor_assign(uint8_t slot, uint8_t type_id, const char *name) {
         return -1;
     }
 
-    memset(&g_sensors[slot], 0, sizeof(g_sensors[slot]));
-    g_sensors[slot].type_id = type_id;
-    g_sensors[slot].enabled = 1;
-    strncpy(g_sensors[slot].name, name, SENSOR_NAME_MAX - 1);
-    g_sensors[slot].name[SENSOR_NAME_MAX - 1] = '\0';
+    memset(&g_sensors[index], 0, sizeof(g_sensors[index]));
+    g_sensors[index].type_id = type_id;
+    g_sensors[index].enabled = 1;
+    strncpy(g_sensors[index].name, name, SENSOR_NAME_MAX - 1);
+    g_sensors[index].name[SENSOR_NAME_MAX - 1] = '\0';
     return 0;
 }
 
-int sensor_unassign(uint8_t slot) {
-    if (slot >= SENSOR_MAX) {
+int sensor_unassign(uint8_t index) {
+    if (index >= SENSOR_MAX) {
         return -2;
     }
-    memset(&g_sensors[slot], 0, sizeof(g_sensors[slot]));
+    memset(&g_sensors[index], 0, sizeof(g_sensors[index]));
     return 0;
 }
 
-int sensor_setName(uint8_t slot, const char *name) {
-    if (slot >= SENSOR_MAX) {
+int sensor_setName(uint8_t index, const char *name) {
+    if (index >= SENSOR_MAX) {
         return -2;
     }
     if (name == NULL) {
         return -1;
     }
-    strncpy(g_sensors[slot].name, name, SENSOR_NAME_MAX - 1);
-    g_sensors[slot].name[SENSOR_NAME_MAX - 1] = '\0';
+    strncpy(g_sensors[index].name, name, SENSOR_NAME_MAX - 1);
+    g_sensors[index].name[SENSOR_NAME_MAX - 1] = '\0';
     return 0;
 }
 
-int sensor_setValue(uint8_t slot, int32_t value) {
-    if (slot >= SENSOR_MAX) {
+int sensor_setValue(uint8_t index, int32_t value) {
+    if (index >= SENSOR_MAX) {
         return -2;
     }
-    g_sensors[slot].value = value;
+    g_sensors[index].value = value;
     /* last_update_ms timestamping deferred — caller (uart task) may set if needed */
     return 0;
 }
 
-int sensor_getValue(uint8_t slot, int32_t *out) {
-    if (slot >= SENSOR_MAX) {
+int sensor_getValue(uint8_t index, int32_t *out) {
+    if (index >= SENSOR_MAX) {
         return -2;
     }
     if (out == NULL) {
         return -1;
     }
-    *out = g_sensors[slot].value;
+    *out = g_sensors[index].value;
     return 0;
 }
 
-const Sensor *sensor_get(uint8_t slot) {
-    if (slot >= SENSOR_MAX) {
+const Sensor *sensor_get(uint8_t index) {
+    if (index >= SENSOR_MAX) {
         return NULL;
     }
-    return &g_sensors[slot];
+    return &g_sensors[index];
 }
 
-int sensor_effectiveScale(uint8_t slot) {
-    if (slot >= SENSOR_MAX) {
+int sensor_effectiveScale(uint8_t index) {
+    if (index >= SENSOR_MAX) {
         return 0;
     }
-    if (g_sensors[slot].scale_override != 0) {
-        return g_sensors[slot].scale_override;
+    if (g_sensors[index].scale_override != 0) {
+        return g_sensors[index].scale_override;
     }
-    const SensorType *t = sensorType_get(g_sensors[slot].type_id);
+    const SensorType *t = sensorType_get(g_sensors[index].type_id);
     return t ? t->default_scale : 0;
 }
 
-const char *sensor_valueLabel(uint8_t slot) {
-    if (slot >= SENSOR_MAX) {
+const char *sensor_valueLabel(uint8_t index) {
+    if (index >= SENSOR_MAX) {
         return NULL;
     }
-    const SensorType *t = sensorType_get(g_sensors[slot].type_id);
+    const SensorType *t = sensorType_get(g_sensors[index].type_id);
     if (t == NULL || t->value_kind != SENSOR_VALUE_DISCRETE) {
         return NULL;   /* CONTINUOUS types have no label */
     }
-    int32_t v = g_sensors[slot].value;
+    int32_t v = g_sensors[index].value;
     /* Only match within uint8_t range — values >= 256 or < 0 are "Unknown". */
     if (v >= 0 && v <= 255) {
         for (uint8_t i = 0; i < t->states_count; i++) {
@@ -283,8 +283,8 @@ const char *sensor_valueLabel(uint8_t slot) {
     return "Unknown";
 }
 
-int sensor_findByType(uint8_t type_id, uint8_t start_slot) {
-    for (uint8_t s = start_slot; s < SENSOR_MAX; s++) {
+int sensor_findByType(uint8_t type_id, uint8_t start_index) {
+    for (uint8_t s = start_index; s < SENSOR_MAX; s++) {
         if (g_sensors[s].enabled && g_sensors[s].type_id == type_id) {
             return s;
         }
