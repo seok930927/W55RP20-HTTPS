@@ -21,6 +21,8 @@
 #include "seg.h"
 
 extern xSemaphoreHandle net_http_webserver_sem;
+extern xSemaphoreHandle net_segcp_udp_sem;
+extern xSemaphoreHandle net_segcp_tcp_sem;
 
 extern uint8_t g_send_buf[DATA_BUF_SIZE];
 extern uint8_t g_recv_mqtt_buf[DATA_BUF_SIZE];
@@ -58,6 +60,8 @@ void net_status_task(void *argument) {
             break;
 
         case NET_LINK_CONNECTED:
+            /* SEGCP UDP search responds even while DHCP is in progress */
+            xSemaphoreGive(net_segcp_udp_sem);
             if (dev_config->network_option.dhcp_use) {
                 set_stop_dhcp_flag(0);
                 if (process_dhcp() == DHCP_IP_LEASED) { // DHCP success
@@ -72,6 +76,7 @@ void net_status_task(void *argument) {
             display_Dev_Info_dhcp();
             g_net_status = NET_IP_UP;
             xSemaphoreGive(net_http_webserver_sem);
+            xSemaphoreGive(net_segcp_tcp_sem);
             ctlnetwork(CN_GET_NETINFO, (void *)&gWIZNETINFO);
             printf("HTTPS server ready: https://%d.%d.%d.%d/\r\n",
                    gWIZNETINFO.ip[0], gWIZNETINFO.ip[1], gWIZNETINFO.ip[2], gWIZNETINFO.ip[3]);

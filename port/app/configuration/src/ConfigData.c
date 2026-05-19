@@ -206,10 +206,24 @@ void set_DevConfig_to_factory_value(void) {
     memset(dev_config.device_option.device_serial_disconnect_data, 0x00, sizeof(dev_config.device_option.device_serial_disconnect_data));
     memset(dev_config.device_option.device_eth_connect_data, 0x00, sizeof(dev_config.device_option.device_eth_connect_data));
 
-    memset(dev_config.snmp_option.allowed_ip, 0x00, sizeof(dev_config.snmp_option.allowed_ip));
-    memset(dev_config.snmp_option.trap_ip, 0x00, sizeof(dev_config.snmp_option.trap_ip));
+    dev_config.devConfigVer = DEV_CONFIG_VER;
 
-    dev_config.devConfigVer = DEV_CONFIG_VER;//DEV_CONFIG_VER;
+    /* Legacy padding is reserved for future legacy growth — keep zero */
+    memset(dev_config.reserved_legacy, 0x00, sizeof(dev_config.reserved_legacy));
+
+    /* Extension section */
+    set_DevConfig_ext_to_factory_value();
+}
+
+void set_DevConfig_ext_to_factory_value(void) {
+    dev_config.ext_magic       = DEVCONFIG_EXT_MAGIC;
+    dev_config.ext_version     = DEVCONFIG_EXT_VERSION;
+    dev_config.ext_reserved0   = 0;
+
+    memset(dev_config.snmp_option.allowed_ip, 0x00, sizeof(dev_config.snmp_option.allowed_ip));
+    memset(dev_config.snmp_option.trap_ip,    0x00, sizeof(dev_config.snmp_option.trap_ip));
+
+    memset(dev_config.reserved_ext, 0x00, sizeof(dev_config.reserved_ext));
 }
 
 void load_DevConfig_from_storage(void) {
@@ -227,19 +241,40 @@ void load_DevConfig_from_storage(void) {
     PRT_INFO("MAC = %02X%02X%02X%02X%02X%02X\r\n", dev_config.network_common.mac[0], dev_config.network_common.mac[1], dev_config.network_common.mac[2], \
              dev_config.network_common.mac[3], dev_config.network_common.mac[4], dev_config.network_common.mac[5]);
 
+    /*
+        Migration policy:
+          - Legacy section is byte-identical to pre-94177ca. devConfigVer at the
+            same offset acts as the legacy-section integrity marker.
+          - Extension section uses its own magic/version. Older firmwares that
+            never wrote the extension area will leave it as 0xFF/garbage; in
+            that case we preserve legacy data and only re-init the extension.
+          - Unrecoverable mismatch (legacy marker invalid OR packet uninitialized)
+            → full factory reset + reboot.
+    */
     if ((dev_config.config_common.packet_size == 0x0000) ||
             (dev_config.config_common.packet_size == 0xFFFF) ||
-            (dev_config.config_common.packet_size != sizeof(DevConfig)))
-        //dev_config.devConfigVer != DEV_CONFIG_VER)
-    {
-        //PRT_INFO("dev_config.devConfigVer = %d, DEV_CONFIG_VER = %d\r\n", dev_config.devConfigVer, DEV_CONFIG_VER);
-        PRT_INFO("Config Data size: %d / %d\r\n", dev_config.config_common.packet_size, sizeof(DevConfig));
+            (dev_config.devConfigVer != DEV_CONFIG_VER)) {
+        PRT_INFO("Legacy DevConfig invalid (ver=%lu pkt=%u, expect ver=%u size=%u)\r\n",
+                 (unsigned long)dev_config.devConfigVer,
+                 dev_config.config_common.packet_size,
+                 DEV_CONFIG_VER,
+                 (unsigned)sizeof(DevConfig));
         PRT_INFO("Start Factory Reset\r\n");
         set_DevConfig_to_factory_value();
         save_DevConfig_to_storage();
-
-        PRT_INFO("After Config Data size: %d / %d\r\n", dev_config.config_common.packet_size, sizeof(DevConfig));
         device_raw_reboot();
+    } else if ((dev_config.config_common.packet_size != sizeof(DevConfig)) ||
+               (dev_config.ext_magic   != DEVCONFIG_EXT_MAGIC) ||
+               (dev_config.ext_version != DEVCONFIG_EXT_VERSION)) {
+        /* Legacy OK, extension stale or absent — preserve legacy, re-init ext */
+        PRT_INFO("Extension area stale (pkt=%u ext_magic=0x%08lX ext_ver=%u) — re-init only ext\r\n",
+                 dev_config.config_common.packet_size,
+                 (unsigned long)dev_config.ext_magic,
+                 dev_config.ext_version);
+        memset(dev_config.reserved_legacy, 0x00, sizeof(dev_config.reserved_legacy));
+        set_DevConfig_ext_to_factory_value();
+        dev_config.config_common.packet_size = sizeof(DevConfig);
+        save_DevConfig_to_storage();
     }
 
     if ((dev_config.serial_option.flow_control == flow_rtsonly) || (dev_config.serial_option.flow_control == flow_reverserts)) { // Edit for supporting RTS only in 17/3/28 , recommend adapting to WIZ750SR

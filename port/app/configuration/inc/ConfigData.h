@@ -145,11 +145,6 @@ struct __device_option {
 } __attribute__((packed));
 #endif
 
-struct __snmp_option {
-    uint8_t allowed_ip[2][4];
-    uint8_t trap_ip[2][4];
-} __attribute__((packed));
-
 struct __ssl_option {
     uint8_t root_ca_option;     //0: Verify_none / 1: Verify_option / 2: Verify_require
     uint8_t client_cert_enable;
@@ -172,7 +167,35 @@ struct __mqtt_option {
 } __attribute__((packed));
 
 
+/*
+    ============================================================
+    [LEGACY SECTION] — DO NOT MODIFY LAYOUT
+    Byte-for-byte compatible with pre-94177ca DevConfig.
+    CONFIG Tool / bootloader rely on this offset map.
+    Append-only growth is forbidden here; use reserved_legacy
+    (and bump ext_version) to absorb future fields if needed.
+    ============================================================
+
+    [EXTENSION SECTION] — new fields land here
+    Gated by ext_magic / ext_version. If a flash blob is read
+    from an older firmware (legacy section valid, extension area
+    blank/garbage), load_DevConfig_from_storage() re-initializes
+    the extension area in place without wiping legacy data.
+*/
+
+/* SNMP option lives in the extension section */
+struct __snmp_option {
+    uint8_t allowed_ip[2][4];
+    uint8_t trap_ip[2][4];
+} __attribute__((packed));
+
+#define DEVCONFIG_EXT_MAGIC      0x57495A45UL  /* 'WIZE' (LE: 45 5A 49 57) */
+#define DEVCONFIG_EXT_VERSION    1
+#define DEVCONFIG_RESERVED_LEGACY_SIZE  64
+#define DEVCONFIG_RESERVED_EXT_SIZE    128
+
 typedef struct __DevConfig {
+    /* ---- LEGACY SECTION (frozen layout) ---- */
     struct __device_common device_common;
     struct __config_common config_common;
     struct __network_common network_common;
@@ -188,12 +211,22 @@ typedef struct __DevConfig {
     struct __ssl_option ssl_option;
     struct __mqtt_option mqtt_option;
     struct __device_option device_option;
-    struct __snmp_option snmp_option;
     uint32_t devConfigVer;
+
+    /* ---- RESERVED PADDING (legacy-side growth absorber) ---- */
+    uint8_t reserved_legacy[DEVCONFIG_RESERVED_LEGACY_SIZE];
+
+    /* ---- EXTENSION SECTION (new fields, ext_magic gated) ---- */
+    uint32_t ext_magic;
+    uint16_t ext_version;
+    uint16_t ext_reserved0;
+    struct __snmp_option snmp_option;
+    uint8_t reserved_ext[DEVCONFIG_RESERVED_EXT_SIZE];
 } __attribute__((packed)) DevConfig;
 
 DevConfig* get_DevConfig_pointer(void);
 void set_DevConfig_to_factory_value(void);
+void set_DevConfig_ext_to_factory_value(void);
 void load_DevConfig_from_storage(void);
 void save_DevConfig_to_storage(void);
 void get_DevConfig_value(void *dest, const void *src, uint16_t size);

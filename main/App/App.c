@@ -25,6 +25,7 @@
 #include "wizchip_conf.h"
 #include "netHandler.h"
 #include "snmpHandler.h"
+#include "segcp.h"
 
 #include "w5x00_spi.h"
 
@@ -43,6 +44,12 @@
 
 #define SNMP_TASK_STACK_SIZE 2048
 #define SNMP_TASK_PRIORITY 7
+
+#define SEGCP_UDP_TASK_STACK_SIZE 1024
+#define SEGCP_UDP_TASK_PRIORITY 52
+
+#define SEGCP_TCP_TASK_STACK_SIZE 1024
+#define SEGCP_TCP_TASK_PRIORITY 51
 
 #define HEAP_MONITOR_TASK_STACK_SIZE 1024
 #define HEAP_MONITOR_TASK_PRIORITY 6
@@ -192,6 +199,10 @@ void start_task(void *argument) {
     set_W5X00_NetTimeout();
     Timer_Configuration();
     net_http_webserver_sem = xSemaphoreCreateCounting((unsigned portBASE_TYPE)0x7fffffff, (unsigned portBASE_TYPE)0);
+    net_segcp_udp_sem = xSemaphoreCreateCounting((unsigned portBASE_TYPE)0x7fffffff, (unsigned portBASE_TYPE)0);
+    net_segcp_tcp_sem = xSemaphoreCreateCounting((unsigned portBASE_TYPE)0x7fffffff, (unsigned portBASE_TYPE)0);
+    segcp_udp_sem = xSemaphoreCreateCounting((unsigned portBASE_TYPE)0x7fffffff, (unsigned portBASE_TYPE)0);
+    segcp_tcp_sem = xSemaphoreCreateCounting((unsigned portBASE_TYPE)0x7fffffff, (unsigned portBASE_TYPE)0);
 
 #if defined(MBEDTLS_PLATFORM_C) && defined(MBEDTLS_PLATFORM_MEMORY)
     mbedtls_platform_set_calloc_free(pvPortCalloc, vPortFree);
@@ -200,6 +211,8 @@ void start_task(void *argument) {
     xTaskCreate(net_status_task, "Net_Status_Task", NET_TASK_STACK_SIZE, NULL, NET_TASK_PRIORITY, NULL);
     xTaskCreate(http_webserver_task, "http_webserver_task", HTTP_WEBSERVER_TASK_STACK_SIZE, NULL, HTTP_WEBSERVER_TASK_PRIORITY, NULL);
     xTaskCreate(snmp_agent_task, "SNMP_Agent_Task", SNMP_TASK_STACK_SIZE, NULL, SNMP_TASK_PRIORITY, NULL);
+    xTaskCreate(segcp_udp_task, "SEGCP_udp_Task", SEGCP_UDP_TASK_STACK_SIZE, NULL, SEGCP_UDP_TASK_PRIORITY, NULL);
+    xTaskCreate(segcp_tcp_task, "SEGCP_tcp_Task", SEGCP_TCP_TASK_STACK_SIZE, NULL, SEGCP_TCP_TASK_PRIORITY, NULL);
     // xTaskCreate(heap_monitor_task, "Heap_Monitor_Task", HEAP_MONITOR_TASK_STACK_SIZE, NULL, HEAP_MONITOR_TASK_PRIORITY, NULL);
 #ifdef __USE_WATCHDOG__
     watchdog_enable(8388, 0);
