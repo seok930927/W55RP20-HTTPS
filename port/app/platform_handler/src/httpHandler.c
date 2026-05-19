@@ -274,32 +274,65 @@ static void get_form_field(const char *body, const char *name,
 /*  -----------------------------------------------------------------------
     JSON API handlers (sensor data + SNMP config)
     --------------------------------------------------------------------- */
+/*
+    Send a single HTTP chunked-encoding chunk:
+      <hex-length>\r\n
+      <data>
+      \r\n
+*/
+static int https_send_http_chunk(wiz_tls_context *ctx, const char *data, size_t len) {
+    char prefix[16];
+    int plen = snprintf(prefix, sizeof(prefix), "%X\r\n", (unsigned)len);
+    if (https_write_all(ctx, (const unsigned char *)prefix, (size_t)plen) < 0) {
+        return -1;
+    }
+    if (len > 0) {
+        if (https_write_all(ctx, (const unsigned char *)data, len) < 0) {
+            return -1;
+        }
+    }
+    return https_write_all(ctx, (const unsigned char *)"\r\n", 2);
+}
+
 static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
     /*
-        Index-based JSON over the sensor.h API:
+        Index-based JSON streamed via HTTP chunked transfer-encoding.
+
+        We never build the full body in RAM — each enabled sensor produces
+        a small (~150 B) chunk that is sent immediately. The browser
+        re-assembles the chunks natively. No Content-Length header.
+
+        Decoded wire shape:
         {
-            "sensors":[
-                {"index":0,"name":"...","type_id":1,"type":"Temperature",
-                 "unit":"°C","scale":-1,"value":256,"label":null},
-                ...
-            ],
-            "comm":{"status":..,"recv_cs":..,"calc_cs":..,"check":..,"flag":..}
+          "sensors":[
+            {"index":0,"name":"...","type_id":1,"type":"Temperature",
+             "unit":"°C","scale":-1,"value":256,"label":null},
+            ...
+          ],
+          "comm":{"status":..,"recv_cs":..,"calc_cs":..,"check":..,"flag":..}
         }
-        Only enabled entries are emitted.
     */
-    /*
-        body buffer sizing:
-          SENSOR_MAX (200) × ~130 B per entry worst case  ≈ 26000 B
-          + envelope ({"sensors":[…],"comm":{…}})          ≈   120 B
-          → 32768 B buffer with headroom.
-    */
-    static char body[32768];
-    char header[128];
-    int n = 0;
+    char chunk[512];
+    int n;
     int first = 1;
 
-    n += snprintf(body + n, sizeof(body) - n, "{\"sensors\":[");
+    /* Response header — chunked, no Content-Length */
+    static const char header[] =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: application/json\r\n"
+        "Transfer-Encoding: chunked\r\n"
+        "Connection: close\r\n\r\n";
+    if (https_write_all(tls_ctx, (const unsigned char *)header,
+                        sizeof(header) - 1) < 0) {
+        return -1;
+    }
 
+    /* Open the JSON object + sensors array */
+    if (https_send_http_chunk(tls_ctx, "{\"sensors\":[", 12) < 0) {
+        return -1;
+    }
+
+    /* One chunk per enabled sensor */
     for (int i = 0; i < SENSOR_MAX; i++) {
         const Sensor *sn = sensor_get((uint8_t)i);
         if (sn == NULL || !sn->enabled) {
@@ -313,42 +346,49 @@ static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
         int scale = sensor_effectiveScale((uint8_t)i);
         const char *label = sensor_valueLabel((uint8_t)i);
 
-        n += snprintf(body + n, sizeof(body) - n,
-                      "%s{\"index\":%d,\"name\":\"%s\",\"type_id\":%u,"
-                      "\"type\":\"%s\",\"unit\":\"%s\",\"scale\":%d,"
-                      "\"value\":%ld,",
-                      first ? "" : ",",
-                      i, sn->name, (unsigned)sn->type_id,
-                      t->name, t->unit, scale,
-                      (long)sn->value);
-
         if (label) {
-            n += snprintf(body + n, sizeof(body) - n,
-                          "\"label\":\"%s\"}", label);
+            n = snprintf(chunk, sizeof(chunk),
+                         "%s{\"index\":%d,\"name\":\"%s\",\"type_id\":%u,"
+                         "\"type\":\"%s\",\"unit\":\"%s\",\"scale\":%d,"
+                         "\"value\":%ld,\"label\":\"%s\"}",
+                         first ? "" : ",",
+                         i, sn->name, (unsigned)sn->type_id,
+                         t->name, t->unit, scale,
+                         (long)sn->value, label);
         } else {
-            n += snprintf(body + n, sizeof(body) - n,
-                          "\"label\":null}");
+            n = snprintf(chunk, sizeof(chunk),
+                         "%s{\"index\":%d,\"name\":\"%s\",\"type_id\":%u,"
+                         "\"type\":\"%s\",\"unit\":\"%s\",\"scale\":%d,"
+                         "\"value\":%ld,\"label\":null}",
+                         first ? "" : ",",
+                         i, sn->name, (unsigned)sn->type_id,
+                         t->name, t->unit, scale,
+                         (long)sn->value);
+        }
+        if (n <= 0 || n >= (int)sizeof(chunk)) {
+            continue;   /* overflow — skip this entry */
+        }
+        if (https_send_http_chunk(tls_ctx, chunk, (size_t)n) < 0) {
+            return -1;
         }
         first = 0;
     }
 
+    /* Close sensors array + comm object */
     uint32_t cs_status, cs_recv, cs_calc, cs_check, cs_flag;
     snmpBuffer_getCommFields(&cs_status, &cs_recv, &cs_calc, &cs_check, &cs_flag);
-
-    n += snprintf(body + n, sizeof(body) - n,
-                  "],\"comm\":{\"status\":%lu,\"recv_cs\":%lu,\"calc_cs\":%lu,"
-                  "\"check\":%lu,\"flag\":%lu}}",
-                  (unsigned long)cs_status, (unsigned long)cs_recv,
-                  (unsigned long)cs_calc, (unsigned long)cs_check,
-                  (unsigned long)cs_flag);
-
-    int hlen = snprintf(header, sizeof(header),
-                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                        "Content-Length: %d\r\nConnection: close\r\n\r\n", n);
-    if (https_write_all(tls_ctx, (const unsigned char *)header, (size_t)hlen) < 0) {
+    n = snprintf(chunk, sizeof(chunk),
+                 "],\"comm\":{\"status\":%lu,\"recv_cs\":%lu,\"calc_cs\":%lu,"
+                 "\"check\":%lu,\"flag\":%lu}}",
+                 (unsigned long)cs_status, (unsigned long)cs_recv,
+                 (unsigned long)cs_calc, (unsigned long)cs_check,
+                 (unsigned long)cs_flag);
+    if (https_send_http_chunk(tls_ctx, chunk, (size_t)n) < 0) {
         return -1;
     }
-    return https_write_all(tls_ctx, (const unsigned char *)body, (size_t)n);
+
+    /* Terminating zero-length chunk */
+    return https_write_all(tls_ctx, (const unsigned char *)"0\r\n\r\n", 5);
 }
 
 static int https_send_config_json(wiz_tls_context *tls_ctx) {
