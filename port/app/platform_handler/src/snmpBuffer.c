@@ -64,9 +64,19 @@ void snmpBuffer_setCommFields(uint32_t status, uint32_t recv_cs,
 
 void snmpBuffer_getCommFields(uint32_t *status, uint32_t *recv_cs,
                               uint32_t *calc_cs, uint32_t *check, uint32_t *flag) {
-    if (status)  *status   = g_snmp_sensor.comm_status;
-    if (recv_cs) *recv_cs  = g_snmp_sensor.recv_checksum;
-    if (calc_cs) *calc_cs  = g_snmp_sensor.calc_checksum;
-    if (check)   *check    = g_snmp_sensor.comm_check;
-    if (flag)    *flag     = g_snmp_sensor.comm_flag;
+    if (status) {
+        *status   = g_snmp_sensor.comm_status;
+    }
+    if (recv_cs) {
+        *recv_cs  = g_snmp_sensor.recv_checksum;
+    }
+    if (calc_cs) {
+        *calc_cs  = g_snmp_sensor.calc_checksum;
+    }
+    if (check) {
+        *check    = g_snmp_sensor.comm_check;
+    }
+    if (flag) {
+        *flag     = g_snmp_sensor.comm_flag;
+    }
 }

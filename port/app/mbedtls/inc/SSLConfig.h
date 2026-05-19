@@ -47,6 +47,16 @@
 #define MBEDTLS_ERROR_STRERROR_DUMMY
 #define MBEDTLS_GENPRIME
 
+/*
+    TLS record buffers — default 16 KB each is overkill for this device.
+    Our largest outbound payload is the 17 KB HTML page, already sent in
+    512 B chunks via mbedtls_ssl_write (see HTTPS_TX_CHUNK_SIZE). mbedTLS
+    fragments any larger ssl_write call into 2 KB records automatically.
+    Per-context heap saved vs. default: (16384 - 2048) * 2 = 28 KB.
+*/
+#define MBEDTLS_SSL_IN_CONTENT_LEN              2048
+#define MBEDTLS_SSL_OUT_CONTENT_LEN             2048
+
 #define MBEDTLS_PLATFORM_C
 #define MBEDTLS_PLATFORM_MEMORY
 #define MBEDTLS_NO_PLATFORM_ENTROPY

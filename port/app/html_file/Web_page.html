@@ -223,32 +223,17 @@ th {
     <main class="content">
         <!-- 센서 탭 -->
         <div id="tab-sensor">
-            <div class="content-header">[ 온습도 센서 및 입출력데이터 ]</div>
+            <div class="content-header">[ 센서 데이터 ]</div>
 
             <section class="section">
-                <div class="section-title">온,습도센서 계측값</div>
+                <div class="section-title">활성 센서</div>
                 <table>
-                    <tr><th>온도 #1</th><td id="t1">0.0 ℃</td><th>습도 #1</th><td id="h1">0.0 %</td><th>경보 #1</th><td id="a1">-</td></tr>
-                    <tr><th>온도 #2</th><td id="t2">0.0 ℃</td><th>습도 #2</th><td id="h2">0.0 %</td><th>경보 #2</th><td id="a2">-</td></tr>
-                    <tr><th>온도 #3</th><td id="t3">0.0 ℃</td><th>습도 #3</th><td id="h3">0.0 %</td><th>경보 #3</th><td id="a3">-</td></tr>
-                    <tr><th>온도 #4</th><td id="t4">0.0 ℃</td><th>습도 #4</th><td id="h4">0.0 %</td><th>경보 #4</th><td id="a4">-</td></tr>
-                    <tr><th>온도 #5</th><td id="t5">0.0 ℃</td><th>습도 #5</th><td id="h5">0.0 %</td><th>경보 #5</th><td id="a5">-</td></tr>
-                    <tr><th>온도 #6</th><td id="t6">0.0 ℃</td><th>습도 #6</th><td id="h6">0.0 %</td><th>경보 #6</th><td id="a6">-</td></tr>
-                    <tr><th>온도 #7</th><td id="t7">0.0 ℃</td><th>습도 #7</th><td id="h7">0.0 %</td><th>경보 #7</th><td id="a7">-</td></tr>
-                    <tr><th>온도 #8</th><td id="t8">0.0 ℃</td><th>습도 #8</th><td id="h8">0.0 %</td><th>경보 #8</th><td id="a8">-</td></tr>
+                    <thead>
+                        <tr><th style="width:60px">슬롯</th><th>이름</th><th style="width:140px">종류</th><th style="width:160px">값</th></tr>
+                    </thead>
+                    <tbody id="sensor-rows"></tbody>
                 </table>
-            </section>
-
-            <section class="section">
-                <div class="section-title">센서 상태 ( 1 : 정상, 2 : 경보 )</div>
-                <table>
-                    <tr><th>센서 1호기 상태</th><td id="s1">-</td><th>센서 2호기 상태</th><td id="s2">-</td></tr>
-                    <tr><th>센서 3호기 상태</th><td id="s3">-</td><th>센서 4호기 상태</th><td id="s4">-</td></tr>
-                    <tr><th>센서 5호기 상태</th><td id="s5">-</td><th>센서 6호기 상태</th><td id="s6">-</td></tr>
-                    <tr><th>센서 7호기 상태</th><td id="s7">-</td><th>센서 8호기 상태</th><td id="s8">-</td></tr>
-                    <tr><th>센서 9호기 상태</th><td id="s9">-</td><th>센서 10호기 상태</th><td id="s10">-</td></tr>
-                    <tr><th>센서 11호기 상태</th><td id="s11">-</td><th>센서 12호기 상태</th><td id="s12">-</td></tr>
-                </table>
+                <div id="sensor-empty" style="text-align:center;padding:20px;color:#888;display:none">활성 슬롯이 없습니다</div>
             </section>
 
             <section class="section">
@@ -328,15 +313,29 @@ th {
 <script>
 var configUnlocked = false;
 
-function fT(v){return(v/10).toFixed(1)+' ℃';}
-function fH(v){return(v/10).toFixed(1)+' %';}
+function escHtml(s){return String(s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function fmtValue(s){
+    if(s.label) return escHtml(s.label);
+    var v = s.value * Math.pow(10, s.scale);
+    var decimals = s.scale < 0 ? -s.scale : 0;
+    var txt = v.toFixed(decimals);
+    if(s.unit) txt += ' ' + s.unit;
+    return escHtml(txt);
+}
 function upd(d){
-    for(var i=1;i<=8;i++){
-        document.getElementById('t'+i).textContent=fT(d.temp[i-1]);
-        document.getElementById('h'+i).textContent=fH(d.humid[i-1]);
-        document.getElementById('a'+i).textContent=d.alarm[i-1];
+    var tbody = document.getElementById('sensor-rows');
+    var empty = document.getElementById('sensor-empty');
+    if(!d.sensors || d.sensors.length === 0){
+        tbody.innerHTML='';
+        empty.style.display='';
+    }else{
+        empty.style.display='none';
+        var html='';
+        d.sensors.forEach(function(s){
+            html += '<tr><td>'+s.slot+'</td><th>'+escHtml(s.name)+'</th><td>'+escHtml(s.type)+'</td><td>'+fmtValue(s)+'</td></tr>';
+        });
+        tbody.innerHTML=html;
     }
-    for(var i=1;i<=12;i++)document.getElementById('s'+i).textContent=d.sensor[i-1];
     document.getElementById('comm_status').textContent=d.comm.status;
     document.getElementById('recv_cs').textContent=d.comm.recv_cs;
     document.getElementById('calc_cs').textContent=d.comm.calc_cs;

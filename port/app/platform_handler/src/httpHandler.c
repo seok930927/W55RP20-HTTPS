@@ -12,6 +12,7 @@
 #include "SSLInterface.h"
 #include "deviceHandler.h"
 #include "snmpBuffer.h"
+#include "sensor.h"
 #include "ConfigData.h"
 #include "snmpHandler.h"
 
@@ -274,41 +275,72 @@ static void get_form_field(const char *body, const char *name,
     JSON API handlers (sensor data + SNMP config)
     --------------------------------------------------------------------- */
 static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
-    static char json_body[800];
+    /*
+        Slot-based JSON over the sensor.h API:
+        {
+            "sensors":[
+                {"slot":0,"name":"...","type_id":1,"type":"Temperature",
+                 "unit":"°C","scale":-1,"value":256,"label":null},
+                ...
+            ],
+            "comm":{"status":..,"recv_cs":..,"calc_cs":..,"check":..,"flag":..}
+        }
+        Only enabled slots are emitted.
+    */
+    /*
+        body buffer sizing:
+          SENSOR_MAX (50) × ~130 B per slot worst case  ≈ 6500 B
+          + envelope ({"sensors":[…],"comm":{…}})        ≈  120 B
+          → 8192 B buffer with headroom.
+    */
+    static char body[8192];
     char header[128];
     int n = 0;
+    int first = 1;
 
-    n += snprintf(json_body + n, sizeof(json_body) - n,
-                  "{\"temp\":[%d,%d,%d,%d,%d,%d,%d,%d]",
-                  g_snmp_sensor.temperature[0], g_snmp_sensor.temperature[1],
-                  g_snmp_sensor.temperature[2], g_snmp_sensor.temperature[3],
-                  g_snmp_sensor.temperature[4], g_snmp_sensor.temperature[5],
-                  g_snmp_sensor.temperature[6], g_snmp_sensor.temperature[7]);
-    n += snprintf(json_body + n, sizeof(json_body) - n,
-                  ",\"humid\":[%u,%u,%u,%u,%u,%u,%u,%u]",
-                  g_snmp_sensor.humidity[0], g_snmp_sensor.humidity[1],
-                  g_snmp_sensor.humidity[2], g_snmp_sensor.humidity[3],
-                  g_snmp_sensor.humidity[4], g_snmp_sensor.humidity[5],
-                  g_snmp_sensor.humidity[6], g_snmp_sensor.humidity[7]);
-    n += snprintf(json_body + n, sizeof(json_body) - n,
-                  ",\"alarm\":[%u,%u,%u,%u,%u,%u,%u,%u]",
-                  g_snmp_sensor.alarm[0], g_snmp_sensor.alarm[1],
-                  g_snmp_sensor.alarm[2], g_snmp_sensor.alarm[3],
-                  g_snmp_sensor.alarm[4], g_snmp_sensor.alarm[5],
-                  g_snmp_sensor.alarm[6], g_snmp_sensor.alarm[7]);
-    n += snprintf(json_body + n, sizeof(json_body) - n,
-                  ",\"sensor\":[%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u,%u]",
-                  g_snmp_sensor.sensor_status[0],  g_snmp_sensor.sensor_status[1],
-                  g_snmp_sensor.sensor_status[2],  g_snmp_sensor.sensor_status[3],
-                  g_snmp_sensor.sensor_status[4],  g_snmp_sensor.sensor_status[5],
-                  g_snmp_sensor.sensor_status[6],  g_snmp_sensor.sensor_status[7],
-                  g_snmp_sensor.sensor_status[8],  g_snmp_sensor.sensor_status[9],
-                  g_snmp_sensor.sensor_status[10], g_snmp_sensor.sensor_status[11]);
-    n += snprintf(json_body + n, sizeof(json_body) - n,
-                  ",\"comm\":{\"status\":%u,\"recv_cs\":%u,\"calc_cs\":%u,\"check\":%u,\"flag\":%u}}",
-                  g_snmp_sensor.comm_status,   g_snmp_sensor.recv_checksum,
-                  g_snmp_sensor.calc_checksum, g_snmp_sensor.comm_check,
-                  g_snmp_sensor.comm_flag);
+    n += snprintf(body + n, sizeof(body) - n, "{\"sensors\":[");
+
+    for (int s = 0; s < SENSOR_MAX; s++) {
+        const Sensor *sn = sensor_get((uint8_t)s);
+        if (sn == NULL || !sn->enabled) {
+            continue;
+        }
+        const SensorType *t = sensorType_get(sn->type_id);
+        if (t == NULL) {
+            continue;
+        }
+
+        int scale = sensor_effectiveScale((uint8_t)s);
+        const char *label = sensor_valueLabel((uint8_t)s);
+
+        n += snprintf(body + n, sizeof(body) - n,
+                      "%s{\"slot\":%d,\"name\":\"%s\",\"type_id\":%u,"
+                      "\"type\":\"%s\",\"unit\":\"%s\",\"scale\":%d,"
+                      "\"value\":%ld,",
+                      first ? "" : ",",
+                      s, sn->name, (unsigned)sn->type_id,
+                      t->name, t->unit, scale,
+                      (long)sn->value);
+
+        if (label) {
+            n += snprintf(body + n, sizeof(body) - n,
+                          "\"label\":\"%s\"}", label);
+        } else {
+            n += snprintf(body + n, sizeof(body) - n,
+                          "\"label\":null}");
+        }
+        first = 0;
+    }
+
+    uint32_t cs_status, cs_recv, cs_calc, cs_check, cs_flag;
+    snmpBuffer_getCommFields(&cs_status, &cs_recv, &cs_calc, &cs_check, &cs_flag);
+
+    n += snprintf(body + n, sizeof(body) - n,
+                  "],\"comm\":{\"status\":%lu,\"recv_cs\":%lu,\"calc_cs\":%lu,"
+                  "\"check\":%lu,\"flag\":%lu}}",
+                  (unsigned long)cs_status, (unsigned long)cs_recv,
+                  (unsigned long)cs_calc, (unsigned long)cs_check,
+                  (unsigned long)cs_flag);
 
     int hlen = snprintf(header, sizeof(header),
                         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
@@ -316,7 +348,7 @@ static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
     if (https_write_all(tls_ctx, (const unsigned char *)header, (size_t)hlen) < 0) {
         return -1;
     }
-    return https_write_all(tls_ctx, (const unsigned char *)json_body, (size_t)n);
+    return https_write_all(tls_ctx, (const unsigned char *)body, (size_t)n);
 }
 
 static int https_send_config_json(wiz_tls_context *tls_ctx) {

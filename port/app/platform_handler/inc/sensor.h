@@ -7,17 +7,24 @@
 extern "C" {
 #endif
 
-/* =========================================================================
+/*  =========================================================================
     Sensor object model
     --------------------------------------------------------------------------
     SensorType  : const class-like descriptor (Temperature / Humidity / RPM ...)
     Sensor      : runtime instance bound to a slot, with user-given name
                   + reference (type_id) to a SensorType
     Adding a new sensor type = add one SensorType definition in sensor.c.
-   ========================================================================= */
+    ========================================================================= */
 
-#define SENSOR_NAME_MAX     32
-#define SENSOR_MAX          32
+/*
+    Fixed-size sensor table.
+    SENSOR_NAME_MAX = 11 → user names limited to 10 ASCII chars + null.
+    Per Sensor struct = 11 + 1 + 1 + 1 + 4 + 4 = 22 B, padded to 24 B.
+    Total g_sensors[] = 50 × 24 = 1200 B static RAM.
+    Worst-case JSON per slot ≈ 130 B → 50 slots ≈ 6500 B (fits body[8192]).
+*/
+#define SENSOR_NAME_MAX     11
+#define SENSOR_MAX          50
 
 /* ===== SensorType (const class-like descriptor) ======================= */
 
@@ -112,8 +119,8 @@ const Sensor *sensor_get(uint8_t slot);
 /* Effective scale = scale_override if non-zero, else SensorType.default_scale. */
 int sensor_effectiveScale(uint8_t slot);
 
-/* DISCRETE sensors only — returns the label matching the current value,
-   or NULL if the slot is not discrete or no label matches. */
+/*  DISCRETE sensors only — returns the label matching the current value,
+    or NULL if the slot is not discrete or no label matches. */
 const char *sensor_valueLabel(uint8_t slot);
 
 /* Iteration — returns slot index or -1 if not found. */

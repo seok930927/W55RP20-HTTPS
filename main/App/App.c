@@ -26,6 +26,7 @@
 #include "netHandler.h"
 #include "snmpHandler.h"
 #include "segcp.h"
+#include "sensor.h"
 
 #include "w5x00_spi.h"
 
@@ -198,6 +199,24 @@ void start_task(void *argument) {
 
     set_W5X00_NetTimeout();
     Timer_Configuration();
+
+    /* ── Sensor bank: 3-slot demo (TEST) ─────────────────────────────── */
+    sensor_init();
+    sensor_assign(0, TYPE_ID_TEMPERATURE, "Sensor 1");
+    sensor_assign(1, TYPE_ID_HUMIDITY,    "Sensor 2");
+    sensor_assign(2, TYPE_ID_STATUS,      "Door 1");
+    sensor_assign(3, TYPE_ID_STATUS,      "Door 1");
+    sensor_assign(4, TYPE_ID_STATUS,      "Door 1");
+    sensor_assign(5, TYPE_ID_STATUS,      "Door 1");
+    sensor_assign(6, TYPE_ID_STATUS,      "Door 1");
+    sensor_setValue(0, 256);   /* 25.6 °C */
+    sensor_setValue(1, 652);   /* 65.2 %RH */
+    sensor_setValue(2, 1);     /* Status = Normal */
+    sensor_setValue(3, 1);     /* Status = Normal */
+    sensor_setValue(4, 1);     /* Status = Normal */
+    sensor_setValue(5, 1);     /* Status = Normal */
+    sensor_setValue(6, 1);     /* Status = Normal */
+
     net_http_webserver_sem = xSemaphoreCreateCounting((unsigned portBASE_TYPE)0x7fffffff, (unsigned portBASE_TYPE)0);
     net_segcp_udp_sem = xSemaphoreCreateCounting((unsigned portBASE_TYPE)0x7fffffff, (unsigned portBASE_TYPE)0);
     net_segcp_tcp_sem = xSemaphoreCreateCounting((unsigned portBASE_TYPE)0x7fffffff, (unsigned portBASE_TYPE)0);

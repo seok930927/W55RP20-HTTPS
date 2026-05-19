@@ -1,13 +1,13 @@
 #include <string.h>
 #include "sensor.h"
 
-/* =========================================================================
+/*  =========================================================================
     Built-in SensorType definitions
     Adding a new type:
       1. Pick a stable type_id (add TYPE_ID_xxx in sensor.h)
       2. Define a const SensorType here
       3. Add it to type_registry[] below
-   ========================================================================= */
+    ========================================================================= */
 
 static const SensorStateLabel STATUS_LABELS[] = {
     { 0, "Unknown"  },
@@ -175,9 +175,9 @@ const SensorType *sensorType_byName(const char *name) {
     return NULL;
 }
 
-/* =========================================================================
+/*  =========================================================================
     Sensor instance bank
-   ========================================================================= */
+    ========================================================================= */
 
 Sensor g_sensors[SENSOR_MAX] = {0};
 
@@ -268,15 +268,19 @@ const char *sensor_valueLabel(uint8_t slot) {
     }
     const SensorType *t = sensorType_get(g_sensors[slot].type_id);
     if (t == NULL || t->value_kind != SENSOR_VALUE_DISCRETE) {
-        return NULL;
+        return NULL;   /* CONTINUOUS types have no label */
     }
     int32_t v = g_sensors[slot].value;
-    for (uint8_t i = 0; i < t->states_count; i++) {
-        if (t->states[i].value == (uint8_t)v) {
-            return t->states[i].label;
+    /* Only match within uint8_t range — values >= 256 or < 0 are "Unknown". */
+    if (v >= 0 && v <= 255) {
+        for (uint8_t i = 0; i < t->states_count; i++) {
+            if (t->states[i].value == (uint8_t)v) {
+                return t->states[i].label;
+            }
         }
     }
-    return NULL;
+    /* DISCRETE but value doesn't match any defined state. */
+    return "Unknown";
 }
 
 int sensor_findByType(uint8_t type_id, uint8_t start_slot) {
