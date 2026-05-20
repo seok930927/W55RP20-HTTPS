@@ -8,6 +8,7 @@
 #include "deviceHandler.h"
 #include "netHandler.h"
 #include "snmp.h"
+#include "snmp_custom.h"
 #include "snmpHandler.h"
 #include "socket.h"
 #include "wizchip_conf.h"
@@ -18,8 +19,16 @@
 #define SNMP_NET_WAIT_MS        200
 #define SNMP_RETRY_WAIT_MS      1000
 
+#define SNMP_TRAP_QUEUE_LEN     32
+
 static uint8_t snmp_initialized = FALSE;
 static uint8_t snmp_agent_ip[4] = {0, };
+
+/*  Ring queue of sensor indexes awaiting a trap. Producer: any task via
+    snmp_notify_sensor(). Consumer: snmp_agent_task via snmp_flush_traps(). */
+static volatile uint8_t snmp_trap_q[SNMP_TRAP_QUEUE_LEN];
+static volatile uint8_t snmp_trap_q_head = 0;
+static volatile uint8_t snmp_trap_q_tail = 0;
 
 static void snmp_agent_close(void) {
     if (getSn_SR(SOCK_SNMP_AGENT) != SOCK_CLOSED) {
@@ -42,7 +51,7 @@ static void snmp_agent_init(void) {
 
     DevConfig *conf = get_DevConfig_pointer();
     snmp_set_allowed_ips((const uint8_t (*)[4])conf->snmp_option.allowed_ip);
-    snmpd_init(NULL, snmp_agent_ip, SOCK_SNMP_AGENT, SOCK_SNMP_AGENT);
+    snmpd_init(NULL, snmp_agent_ip, SOCK_SNMP_AGENT, SOCK_SNMP_TRAP);
     snmp_initialized = TRUE;
 
     PRT_INFO("SNMP Agent ready: udp://%d.%d.%d.%d:%d\r\n",
@@ -55,6 +64,37 @@ static void snmp_agent_init(void) {
 
 void snmp_request_reinit(void) {
     snmp_agent_close();
+}
+
+void snmp_notify_sensor(uint8_t index) {
+    taskENTER_CRITICAL();
+    uint8_t next = (uint8_t)((snmp_trap_q_head + 1) % SNMP_TRAP_QUEUE_LEN);
+    if (next != snmp_trap_q_tail) {            /* drop if queue full */
+        snmp_trap_q[snmp_trap_q_head] = index;
+        snmp_trap_q_head = next;
+    }
+    taskEXIT_CRITICAL();
+}
+
+/*  Drain the trap queue. Runs inside snmp_agent_task so it shares the agent
+    socket sequentially — no cross-task contention on SOCK_SNMP_AGENT. */
+static void snmp_flush_traps(void) {
+    DevConfig *conf = get_DevConfig_pointer();
+
+    while (snmp_trap_q_tail != snmp_trap_q_head) {
+        taskENTER_CRITICAL();
+        uint8_t index = snmp_trap_q[snmp_trap_q_tail];
+        snmp_trap_q_tail = (uint8_t)((snmp_trap_q_tail + 1) % SNMP_TRAP_QUEUE_LEN);
+        taskEXIT_CRITICAL();
+
+        for (int t = 0; t < 2; t++) {
+            const uint8_t *mgr = conf->snmp_option.trap_ip[t];
+            if ((mgr[0] | mgr[1] | mgr[2] | mgr[3]) == 0) {
+                continue;                     /* trap destination not set */
+            }
+            snmp_custom_sendValueTrap(mgr, snmp_agent_ip, index);
+        }
+    }
 }
 
 void snmp_agent_task(void *argument) {
@@ -77,6 +117,13 @@ void snmp_agent_task(void *argument) {
         if (!snmp_initialized) {
             snmp_agent_init();
         }
+
+        /*  Send any queued traps (reuses the agent socket; snmpd_run below
+            reopens it from SOCK_CLOSED on the same cycle). */
+        snmp_flush_traps();
+
+        /* Sync sensor bank → SNMP table before serving any request */
+        snmp_custom_refresh();
 
         if (snmpd_run() < 0) {
             PRT_ERR("SNMP Agent run failed, retry after socket reinit\r\n");

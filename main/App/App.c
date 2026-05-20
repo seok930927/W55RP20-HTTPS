@@ -208,7 +208,7 @@ void start_task(void *argument) {
     // 200개 TEST용 센서 인스턴스 할당. 실제 제품에서는 UART/Modbus 등으로 동적 할당될 예정.
     sensor_init();
 
-    for (uint8_t i = 0; i < 254; i++) {
+    for (uint8_t i = 0; i < 255; i++) {
         char name[16];
         snprintf(name, sizeof(name), "Sensor %d", i);
         sensor_assign(i, TYPE_ID_TEMPERATURE, name);

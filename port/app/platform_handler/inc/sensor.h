@@ -24,7 +24,7 @@ extern "C" {
     Worst-case JSON per entry ≈ 130 B → 200 entries ≈ 26 KB (fits body[32768]).
 */
 #define SENSOR_NAME_MAX     11
-#define SENSOR_MAX          200
+#define SENSOR_MAX          256
 
 /* ===== SensorType (const class-like descriptor) ======================= */
 

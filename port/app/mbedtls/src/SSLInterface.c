@@ -426,6 +426,15 @@ int wiz_tls_server_init(wiz_tls_context* tlsContext, int* socket_fd) {
     mbedtls_ssl_conf_rng(tlsContext->conf, mbedtls_ctr_drbg_random, tlsContext->ctr_drbg);
     mbedtls_ssl_conf_read_timeout(tlsContext->conf, 2000);
 
+    /* Restrict to SHA-256 ciphersuites (customer requirement). */
+    static const int https_ciphersuites[] = {
+        MBEDTLS_TLS_RSA_WITH_AES_128_GCM_SHA256,
+        MBEDTLS_TLS_RSA_WITH_AES_128_CBC_SHA256,
+        MBEDTLS_TLS_RSA_WITH_AES_256_CBC_SHA256,
+        0
+    };
+    mbedtls_ssl_conf_ciphersuites(tlsContext->conf, https_ciphersuites);
+
     ret = mbedtls_ssl_conf_own_cert(tlsContext->conf, tlsContext->clicert, tlsContext->pkey);
     if (ret != 0) {
         PRT_SSL(" failed\r\n  ! mbedtls_ssl_conf_own_cert returned -0x%x\r\n", -ret);

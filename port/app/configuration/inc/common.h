@@ -37,6 +37,11 @@
 #define SOCK_HTTPSERVER_3       6
 #define SOCK_SNMP_AGENT         7
 
+/*  SNMP trap reuses socket 0: the S2E data path (SOCK_DATA) is not started
+    in this firmware, so socket 0 is free for the brief open/sendto/close
+    of each trap. Keeps SOCK_SNMP_AGENT (7) from bouncing on every trap. */
+#define SOCK_SNMP_TRAP          SOCK_DATA
+
 #define SEG_DATA0_SOCK          SOCK_DATA
 #define SEGCP_UDP_SOCK          SOCK_CONFIG_UDP
 #define SEGCP_TCP_SOCK          SOCK_CONFIG_TCP

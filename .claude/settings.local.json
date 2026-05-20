@@ -25,7 +25,8 @@
       "Bash(py tools\\\\html_to_c_header.py port\\\\app\\\\html_file\\\\Web_page.html port\\\\app\\\\html_file\\\\Web_page.h)",
       "Bash(py tools/html_to_c_header.py port/app/html_file/Web_page.html port/app/html_file/Web_page.h)",
       "Bash(cmake --build . --target App_linker)",
-      "Bash(cmake --build c:/projects/W55RP20-HTTPS/build --target App_linker)"
+      "Bash(cmake --build c:/projects/W55RP20-HTTPS/build --target App_linker)",
+      "PowerShell(wsl hostname -I; Write-Output \"=== firewall UDP 162 rules ===\"; Get-NetFirewallRule -Direction Inbound -Enabled True -Action Allow -ErrorAction SilentlyContinue | Get-NetFirewallPortFilter -ErrorAction SilentlyContinue | Where-Object { $_.Protocol -eq 'UDP' -and \\($_.LocalPort -eq '162' -or $_.LocalPort -eq 'Any'\\) } | Select-Object Protocol, LocalPort -First 5)"
     ]
   }
 }

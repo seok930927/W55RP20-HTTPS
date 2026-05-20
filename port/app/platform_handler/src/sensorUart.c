@@ -13,7 +13,8 @@
 
 #include "sensorUart.h"
 #include "sensor.h"
-#include "uartHandler.h"      /* UART_ID, DATA0_UART_Configuration */
+#include "snmpHandler.h"      /* snmp_notify_sensor */
+#include "uartHandler.h"      /* UART_ID, platform_uart_puts, DATA0_UART_Configuration */
 #include "bufferHandler.h"    /* data buffer ring */
 #include "WIZ5XXSR-RP_Debug.h"
 
@@ -57,47 +58,17 @@ void sensorUart_init(void) {
              (UART_ID == uart0) ? 0 : 1);
 }
 
-/*  ===== Line parser ======================================================
-    Format: S<start_index>=<v0>[,<v1>,<v2>,...]
-      - Leading whitespace tolerated
-      - Both 'S' and 's' accepted
-      - First value goes to start_index, each subsequent comma-separated
-        value increments the index by 1
-      - index range checked by sensor_setValue
-    Examples:
-      "S0=256"               → index 0 = 256
-      "S0=256,12,23,43,23"   → indexes 0..4 = 256,12,23,43,23
-      "S10=1, 2, 3"          → indexes 10,11,12 = 1,2,3
+/* Send a NUL-terminated string out the data UART. */
+static void uart_tx_str(const char *s) {
+    platform_uart_puts((uint8_t *)s, (uint16_t)strlen(s));
+}
+
+/*  ===== Write handler  (S / T commands) =================================
+    Walk comma-separated values, assigning to consecutive indexes.
+    send_trap != 0 → also queue an SNMP trap for each index written (T).
     ========================================================================= */
-static void parse_line(const char *line) {
-    /* Skip leading whitespace */
-    while (*line == ' ' || *line == '\t') {
-        line++;
-    }
-    if (*line == '\0') {
-        return;     /* empty line */
-    }
-
-    if (*line != 'S' && *line != 's') {
-        PRT_INFO("sensorUart: ignoring '%s'\r\n", line);
-        return;
-    }
-    line++;
-
-    if (!isdigit((unsigned char) * line)) {
-        return;
-    }
-
-    int index = atoi(line);
-    const char *eq = strchr(line, '=');
-    if (eq == NULL) {
-        return;
-    }
-
-    /* Walk comma-separated values, assigning to consecutive indexes. */
-    const char *p = eq + 1;
+static void parse_write(const char *p, int index, uint8_t send_trap) {
     while (*p) {
-        /* atoi tolerates leading whitespace; skip explicitly for clarity */
         while (*p == ' ' || *p == '\t') {
             p++;
         }
@@ -115,6 +86,9 @@ static void parse_line(const char *line) {
         int ret = sensor_setValue((uint8_t)index, value);
         if (ret == 0) {
             PRT_INFO("sensorUart: index %d = %ld\r\n", index, (long)value);
+            if (send_trap) {
+                snmp_notify_sensor((uint8_t)index);
+            }
         } else {
             PRT_INFO("sensorUart: setValue(%d, %ld) -> %d\r\n",
                      index, (long)value, ret);
@@ -128,6 +102,99 @@ static void parse_line(const char *line) {
             p++;
             index++;
         }
+    }
+}
+
+/*  ===== Request handler  (R command) ====================================
+    "R<index>"          → reply one line
+    "R<start>~<end>"    → reply one line per index in range
+    Reply format (per index):  R<index>=<value>\r\n
+    Out-of-range indexes are skipped.
+    ========================================================================= */
+static void parse_request(const char *p) {
+    while (*p == ' ' || *p == '\t') {
+        p++;
+    }
+    if (!isdigit((unsigned char) * p)) {
+        return;
+    }
+
+    int start = atoi(p);
+    int end   = start;
+
+    const char *tilde = strchr(p, '~');
+    if (tilde != NULL) {
+        const char *q = tilde + 1;
+        while (*q == ' ' || *q == '\t') {
+            q++;
+        }
+        if (isdigit((unsigned char) * q)) {
+            end = atoi(q);
+        }
+    }
+    if (end < start) {
+        int tmp = start;
+        start = end;
+        end = tmp;
+    }
+    if (start < 0) {
+        start = 0;
+    }
+    if (start >= SENSOR_MAX) {
+        return;
+    }
+    if (end >= SENSOR_MAX) {
+        end = SENSOR_MAX - 1;
+    }
+
+    for (int i = start; i <= end; i++) {
+        int32_t value;
+        char buf[32];
+        if (sensor_getValue((uint8_t)i, &value) != 0) {
+            continue;
+        }
+        snprintf(buf, sizeof(buf), "R%d=%ld\r\n", i, (long)value);
+        uart_tx_str(buf);
+    }
+}
+
+/*  ===== Line parser ======================================================
+    Commands (leading whitespace tolerated, case-insensitive):
+      S<index>=<v0>[,<v1>,...]   write values to consecutive indexes
+      T<index>=<v0>[,<v1>,...]   same as S, plus an SNMP trap per index
+      R<index>                   request one value  → reply on UART TX
+      R<start>~<end>             request a range    → reply on UART TX
+    Examples:
+      "S0=256,12,23"   → indexes 0,1,2 = 256,12,23
+      "T5=10,20"       → indexes 5,6 = 10,20  + traps for 5,6
+      "R5"             → "R5=999111\r\n"
+      "R5~14"          → "R5=...\r\n" ... "R14=...\r\n"
+    ========================================================================= */
+static void parse_line(const char *line) {
+    while (*line == ' ' || *line == '\t') {
+        line++;
+    }
+    if (*line == '\0') {
+        return;     /* empty line */
+    }
+
+    char cmd = (char)toupper((unsigned char) * line);
+    const char *rest = line + 1;
+
+    if (cmd == 'S' || cmd == 'T') {
+        if (!isdigit((unsigned char) * rest)) {
+            return;
+        }
+        int index = atoi(rest);
+        const char *eq = strchr(rest, '=');
+        if (eq == NULL) {
+            return;
+        }
+        parse_write(eq + 1, index, (uint8_t)(cmd == 'T'));
+    } else if (cmd == 'R') {
+        parse_request(rest);
+    } else {
+        PRT_INFO("sensorUart: ignoring '%s'\r\n", line);
     }
 }
 
