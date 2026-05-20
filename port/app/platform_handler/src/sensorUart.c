@@ -13,7 +13,7 @@
 
 #include "sensorUart.h"
 #include "sensor.h"
-#include "snmpHandler.h"      /* snmp_notify_sensor */
+#include "snmpHandler.h"      /* snmp_notify_device */
 #include "uartHandler.h"      /* UART_ID, platform_uart_puts, DATA0_UART_Configuration */
 #include "bufferHandler.h"    /* data buffer ring */
 #include "WIZ5XXSR-RP_Debug.h"
@@ -64,52 +64,66 @@ static void uart_tx_str(const char *s) {
 }
 
 /*  ===== Write handler  (S / T commands) =================================
-    Walk comma-separated values, assigning to consecutive indexes.
-    send_trap != 0 → also queue an SNMP trap for each index written (T).
+    Two-level value list:
+        ','  → next value column within the current device
+        ';'  → next device (column resets to 0)
+    "S<dev>=..." starts at device <dev>; each ';' group advances to the
+    next consecutive device. Values past DEVICE_VALUE_COLS / devices past
+    DEVICE_COUNT are ignored.
+        S1=12,23,1            device 1 = {12,23,1}
+        S1=12,23,1;13,24,0    device 1 = {12,23,1}, device 2 = {13,24,0}
+    send_trap != 0 (T command) → queue one SNMP trap per device touched.
     ========================================================================= */
-static void parse_write(const char *p, int index, uint8_t send_trap) {
+static void parse_write(const char *p, int dev, uint8_t send_trap) {
+    uint8_t col         = 0;
+    int     touched_dev = -1;   /* device currently being written, -1 = none */
+
     while (*p) {
-        while (*p == ' ' || *p == '\t') {
+        if (*p == ' ' || *p == '\t') {
             p++;
+            continue;
         }
-        if (*p == '\0' || *p == ',') {
-            /* empty token between commas → skip but still advance index */
-            if (*p == ',') {
-                p++;
-                index++;
-                continue;
+        if (*p == ';') {                       /* next device */
+            if (send_trap && touched_dev >= 0) {
+                snmp_notify_device((uint8_t)touched_dev);
             }
-            break;
+            touched_dev = -1;
+            p++;
+            dev++;
+            col = 0;
+            continue;
+        }
+        if (*p == ',') {                       /* next value column */
+            p++;
+            col++;
+            continue;
         }
 
+        /* numeric token */
         int32_t value = atoi(p);
-        int ret = sensor_setValue((uint8_t)index, value);
-        if (ret == 0) {
-            PRT_INFO("sensorUart: index %d = %ld\r\n", index, (long)value);
-            if (send_trap) {
-                snmp_notify_sensor((uint8_t)index);
+        if (dev >= 0 && dev < DEVICE_COUNT && col < DEVICE_VALUE_COLS) {
+            if (device_setValue((uint8_t)dev, col, value) == 0) {
+                PRT_INFO("sensorUart: dev %d col %u = %ld\r\n",
+                         dev, col, (long)value);
+                touched_dev = dev;
             }
-        } else {
-            PRT_INFO("sensorUart: setValue(%d, %ld) -> %d\r\n",
-                     index, (long)value, ret);
         }
+        /* advance past the number to the next ',' / ';' / end */
+        while (*p && *p != ',' && *p != ';') {
+            p++;
+        }
+    }
 
-        /* Advance to next comma (or end) */
-        while (*p && *p != ',') {
-            p++;
-        }
-        if (*p == ',') {
-            p++;
-            index++;
-        }
+    if (send_trap && touched_dev >= 0) {
+        snmp_notify_device((uint8_t)touched_dev);
     }
 }
 
 /*  ===== Request handler  (R command) ====================================
-    "R<index>"          → reply one line
-    "R<start>~<end>"    → reply one line per index in range
-    Reply format (per index):  R<index>=<value>\r\n
-    Out-of-range indexes are skipped.
+    "R<dev>"          → reply one line with the device's value columns
+    "R<d1>~<d2>"      → reply one line per device in range
+    Reply format:  R<dev>=<v0>,<v1>,...\r\n
+    Out-of-range devices are skipped.
     ========================================================================= */
 static void parse_request(const char *p) {
     while (*p == ' ' || *p == '\t') {
@@ -140,35 +154,43 @@ static void parse_request(const char *p) {
     if (start < 0) {
         start = 0;
     }
-    if (start >= SENSOR_MAX) {
+    if (start >= DEVICE_COUNT) {
         return;
     }
-    if (end >= SENSOR_MAX) {
-        end = SENSOR_MAX - 1;
+    if (end >= DEVICE_COUNT) {
+        end = DEVICE_COUNT - 1;
     }
 
-    for (int i = start; i <= end; i++) {
-        int32_t value;
-        char buf[32];
-        if (sensor_getValue((uint8_t)i, &value) != 0) {
-            continue;
+    for (int d = start; d <= end; d++) {
+        char buf[160];
+        int  n = snprintf(buf, sizeof(buf), "R%d=", d);
+
+        for (uint8_t c = 0;
+                c < DEVICE_VALUE_COLS && n > 0 && n < (int)sizeof(buf); c++) {
+            int32_t v = 0;
+            device_getValue((uint8_t)d, c, &v);
+            n += snprintf(buf + n, sizeof(buf) - n, "%s%ld",
+                          c ? "," : "", (long)v);
         }
-        snprintf(buf, sizeof(buf), "R%d=%ld\r\n", i, (long)value);
-        uart_tx_str(buf);
+        if (n > 0 && n < (int)sizeof(buf) - 2) {
+            n += snprintf(buf + n, sizeof(buf) - n, "\r\n");
+            uart_tx_str(buf);
+        }
     }
 }
 
 /*  ===== Line parser ======================================================
     Commands (leading whitespace tolerated, case-insensitive):
-      S<index>=<v0>[,<v1>,...]   write values to consecutive indexes
-      T<index>=<v0>[,<v1>,...]   same as S, plus an SNMP trap per index
-      R<index>                   request one value  → reply on UART TX
-      R<start>~<end>             request a range    → reply on UART TX
-    Examples:
-      "S0=256,12,23"   → indexes 0,1,2 = 256,12,23
-      "T5=10,20"       → indexes 5,6 = 10,20  + traps for 5,6
-      "R5"             → "R5=999111\r\n"
-      "R5~14"          → "R5=...\r\n" ... "R14=...\r\n"
+      S<dev>=<vals>            write values; ',' = column, ';' = next device
+      T<dev>=<vals>            same as S, plus an SNMP trap per device
+      R<dev>                   request one device  → reply on UART TX
+      R<d1>~<d2>               request a device range → reply on UART TX
+    Examples (DEVICE_VALUE_COLS = 3):
+      "S0=235,600,0"          → device 0 = {235, 600, 0}
+      "S0=235,600,0;236,601,1"→ device 0 + device 1
+      "T5=10,20,1"            → device 5 = {10, 20, 1}  + trap
+      "R5"                    → "R5=235,600,0\r\n"
+      "R5~9"                  → one "R<d>=...\r\n" line per device 5..9
     ========================================================================= */
 static void parse_line(const char *line) {
     while (*line == ' ' || *line == '\t') {
@@ -185,12 +207,12 @@ static void parse_line(const char *line) {
         if (!isdigit((unsigned char) * rest)) {
             return;
         }
-        int index = atoi(rest);
+        int dev = atoi(rest);
         const char *eq = strchr(rest, '=');
         if (eq == NULL) {
             return;
         }
-        parse_write(eq + 1, index, (uint8_t)(cmd == 'T'));
+        parse_write(eq + 1, dev, (uint8_t)(cmd == 'T'));
     } else if (cmd == 'R') {
         parse_request(rest);
     } else {

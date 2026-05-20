@@ -7,6 +7,7 @@
 #include "common.h"
 #include "deviceHandler.h"
 #include "netHandler.h"
+#include "sensor.h"
 #include "snmp.h"
 #include "snmp_custom.h"
 #include "snmpHandler.h"
@@ -24,8 +25,8 @@
 static uint8_t snmp_initialized = FALSE;
 static uint8_t snmp_agent_ip[4] = {0, };
 
-/*  Ring queue of sensor indexes awaiting a trap. Producer: any task via
-    snmp_notify_sensor(). Consumer: snmp_agent_task via snmp_flush_traps(). */
+/*  Ring queue of device numbers awaiting a trap. Producer: any task via
+    snmp_notify_device(). Consumer: snmp_agent_task via snmp_flush_traps(). */
 static volatile uint8_t snmp_trap_q[SNMP_TRAP_QUEUE_LEN];
 static volatile uint8_t snmp_trap_q_head = 0;
 static volatile uint8_t snmp_trap_q_tail = 0;
@@ -66,24 +67,25 @@ void snmp_request_reinit(void) {
     snmp_agent_close();
 }
 
-void snmp_notify_sensor(uint8_t index) {
+void snmp_notify_device(uint8_t dev) {
     taskENTER_CRITICAL();
     uint8_t next = (uint8_t)((snmp_trap_q_head + 1) % SNMP_TRAP_QUEUE_LEN);
     if (next != snmp_trap_q_tail) {            /* drop if queue full */
-        snmp_trap_q[snmp_trap_q_head] = index;
+        snmp_trap_q[snmp_trap_q_head] = dev;
         snmp_trap_q_head = next;
     }
     taskEXIT_CRITICAL();
 }
 
-/*  Drain the trap queue. Runs inside snmp_agent_task so it shares the agent
-    socket sequentially — no cross-task contention on SOCK_SNMP_AGENT. */
+/*  Drain the trap queue. Runs inside snmp_agent_task so it shares the trap
+    socket sequentially — no cross-task contention. One trap is emitted per
+    value column of each queued device. */
 static void snmp_flush_traps(void) {
     DevConfig *conf = get_DevConfig_pointer();
 
     while (snmp_trap_q_tail != snmp_trap_q_head) {
         taskENTER_CRITICAL();
-        uint8_t index = snmp_trap_q[snmp_trap_q_tail];
+        uint8_t dev = snmp_trap_q[snmp_trap_q_tail];
         snmp_trap_q_tail = (uint8_t)((snmp_trap_q_tail + 1) % SNMP_TRAP_QUEUE_LEN);
         taskEXIT_CRITICAL();
 
@@ -92,7 +94,9 @@ static void snmp_flush_traps(void) {
             if ((mgr[0] | mgr[1] | mgr[2] | mgr[3]) == 0) {
                 continue;                     /* trap destination not set */
             }
-            snmp_custom_sendValueTrap(mgr, snmp_agent_ip, index);
+            for (uint8_t c = 0; c < DEVICE_VALUE_COLS; c++) {
+                snmp_custom_sendValueTrap(mgr, snmp_agent_ip, dev, c);
+            }
         }
     }
 }

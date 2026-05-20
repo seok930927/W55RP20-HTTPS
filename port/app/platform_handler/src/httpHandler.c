@@ -296,17 +296,16 @@ static int https_send_http_chunk(wiz_tls_context *ctx, const char *data, size_t 
 
 static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
     /*
-        Index-based JSON streamed via HTTP chunked transfer-encoding.
+        Device-grouped JSON streamed via HTTP chunked transfer-encoding.
 
-        We never build the full body in RAM — each enabled sensor produces
-        a small (~150 B) chunk that is sent immediately. The browser
-        re-assembles the chunks natively. No Content-Length header.
+        We never build the full body in RAM — each enabled device produces
+        a small chunk that is sent immediately. No Content-Length header.
 
         Decoded wire shape:
         {
-          "sensors":[
-            {"index":0,"name":"...","type_id":1,"type":"Temperature",
-             "unit":"°C","scale":-1,"value":256,"label":null},
+          "columns":[{"name":"Temperature","unit":"C","scale":-1}, ...],
+          "devices":[
+            {"index":1,"name":"...","values":[235,600,0]},
             ...
           ],
           "comm":{"status":..,"recv_cs":..,"calc_cs":..,"check":..,"flag":..}
@@ -327,43 +326,44 @@ static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
         return -1;
     }
 
-    /* Open the JSON object + sensors array */
-    if (https_send_http_chunk(tls_ctx, "{\"sensors\":[", 12) < 0) {
+    /* Open object + value-column descriptors */
+    n = snprintf(chunk, sizeof(chunk), "{\"columns\":[");
+    for (uint8_t c = 0;
+            c < DEVICE_VALUE_COLS && n > 0 && n < (int)sizeof(chunk); c++) {
+        const ValueColumn *vc = valueColumn_get(c);
+        n += snprintf(chunk + n, sizeof(chunk) - n,
+                      "%s{\"name\":\"%s\",\"unit\":\"%s\",\"scale\":%d}",
+                      c ? "," : "",
+                      vc ? vc->name : "", vc ? vc->unit : "",
+                      vc ? vc->scale : 0);
+    }
+    if (n > 0 && n < (int)sizeof(chunk)) {
+        n += snprintf(chunk + n, sizeof(chunk) - n, "],\"devices\":[");
+    }
+    if (n <= 0 || n >= (int)sizeof(chunk)) {
+        return -1;
+    }
+    if (https_send_http_chunk(tls_ctx, chunk, (size_t)n) < 0) {
         return -1;
     }
 
-    /* One chunk per enabled sensor */
-    for (int i = 0; i < SENSOR_MAX; i++) {
-        const Sensor *sn = sensor_get((uint8_t)i);
-        if (sn == NULL || !sn->enabled) {
-            continue;
-        }
-        const SensorType *t = sensorType_get(sn->type_id);
-        if (t == NULL) {
+    /* One chunk per enabled device */
+    for (int d = 0; d < DEVICE_COUNT; d++) {
+        const Device *dev = device_get((uint8_t)d);
+        if (dev == NULL || !dev->enabled) {
             continue;
         }
 
-        int scale = sensor_effectiveScale((uint8_t)i);
-        const char *label = sensor_valueLabel((uint8_t)i);
-
-        if (label) {
-            n = snprintf(chunk, sizeof(chunk),
-                         "%s{\"index\":%d,\"name\":\"%s\",\"type_id\":%u,"
-                         "\"type\":\"%s\",\"unit\":\"%s\",\"scale\":%d,"
-                         "\"value\":%ld,\"label\":\"%s\"}",
-                         first ? "" : ",",
-                         i, sn->name, (unsigned)sn->type_id,
-                         t->name, t->unit, scale,
-                         (long)sn->value, label);
-        } else {
-            n = snprintf(chunk, sizeof(chunk),
-                         "%s{\"index\":%d,\"name\":\"%s\",\"type_id\":%u,"
-                         "\"type\":\"%s\",\"unit\":\"%s\",\"scale\":%d,"
-                         "\"value\":%ld,\"label\":null}",
-                         first ? "" : ",",
-                         i, sn->name, (unsigned)sn->type_id,
-                         t->name, t->unit, scale,
-                         (long)sn->value);
+        n = snprintf(chunk, sizeof(chunk),
+                     "%s{\"index\":%d,\"name\":\"%s\",\"values\":[",
+                     first ? "" : ",", d + 1, dev->name);
+        for (uint8_t c = 0;
+                c < DEVICE_VALUE_COLS && n > 0 && n < (int)sizeof(chunk); c++) {
+            n += snprintf(chunk + n, sizeof(chunk) - n, "%s%ld",
+                          c ? "," : "", (long)dev->value[c]);
+        }
+        if (n > 0 && n < (int)sizeof(chunk)) {
+            n += snprintf(chunk + n, sizeof(chunk) - n, "]}");
         }
         if (n <= 0 || n >= (int)sizeof(chunk)) {
             continue;   /* overflow — skip this entry */
@@ -374,7 +374,7 @@ static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
         first = 0;
     }
 
-    /* Close sensors array + comm object */
+    /* Close devices array + comm object */
     uint32_t cs_status, cs_recv, cs_calc, cs_check, cs_flag;
     snmpBuffer_getCommFields(&cs_status, &cs_recv, &cs_calc, &cs_check, &cs_flag);
     n = snprintf(chunk, sizeof(chunk),

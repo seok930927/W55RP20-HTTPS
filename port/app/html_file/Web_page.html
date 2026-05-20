@@ -229,20 +229,14 @@ th {
     </nav>
 
     <main class="content">
-        <!-- 센서 탭 -->
+        <!-- 디바이스 탭 -->
         <div id="tab-sensor">
-            <div class="content-header">[ 센서 데이터 ]</div>
+            <div class="content-header">[ 디바이스 데이터 ]</div>
 
             <section class="section">
-                <div class="section-title">활성 센서</div>
+                <div class="section-title">활성 디바이스</div>
                 <table class="sensor-table">
-                    <thead>
-                        <tr>
-                            <th class="col-idx">Idx</th><th>이름</th><th>값</th>
-                            <th class="col-idx">Idx</th><th>이름</th><th>값</th>
-                            <th class="col-idx">Idx</th><th>이름</th><th>값</th>
-                        </tr>
-                    </thead>
+                    <thead id="sensor-head"></thead>
                     <tbody id="sensor-rows"></tbody>
                 </table>
                 <div id="sensor-empty" style="text-align:center;padding:20px;color:#888;display:none">활성 항목이 없습니다</div>
@@ -326,32 +320,39 @@ th {
 var configUnlocked = false;
 
 function escHtml(s){return String(s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
-function fmtValue(s){
-    if(s.label) return escHtml(s.label);
-    var v = s.value * Math.pow(10, s.scale);
-    var decimals = s.scale < 0 ? -s.scale : 0;
-    var txt = v.toFixed(decimals);
-    if(s.unit) txt += ' ' + s.unit;
+function fmtValue(v, col){
+    var scaled = v * Math.pow(10, col.scale);
+    var decimals = col.scale < 0 ? -col.scale : 0;
+    var txt = scaled.toFixed(decimals);
+    if(col.unit) txt += ' ' + col.unit;
     return escHtml(txt);
 }
 function upd(d){
+    var head  = document.getElementById('sensor-head');
     var tbody = document.getElementById('sensor-rows');
     var empty = document.getElementById('sensor-empty');
-    if(!d.sensors || d.sensors.length === 0){
+    var cols  = d.columns || [];
+
+    var hh = '<tr><th class="col-idx">Idx</th><th>이름</th>';
+    for(var c=0; c<cols.length; c++){
+        var u = cols[c].unit ? ' ('+escHtml(cols[c].unit)+')' : '';
+        hh += '<th>'+escHtml(cols[c].name)+u+'</th>';
+    }
+    hh += '</tr>';
+    head.innerHTML = hh;
+
+    if(!d.devices || d.devices.length === 0){
         tbody.innerHTML='';
         empty.style.display='';
     }else{
         empty.style.display='none';
         var html='';
-        for(var i=0; i<d.sensors.length; i+=3){
-            html += '<tr>';
-            for(var k=0; k<3; k++){
-                var s = d.sensors[i+k];
-                if(s){
-                    html += '<td class="col-idx">'+s.index+'</td><th>'+escHtml(s.name)+'</th><td>'+fmtValue(s)+'</td>';
-                } else {
-                    html += '<td class="col-idx"></td><td></td><td></td>';
-                }
+        for(var i=0; i<d.devices.length; i++){
+            var dev = d.devices[i];
+            html += '<tr><td class="col-idx">'+dev.index+'</td><th>'+escHtml(dev.name)+'</th>';
+            for(var c=0; c<cols.length; c++){
+                var v = (dev.values && dev.values[c]!=null) ? dev.values[c] : 0;
+                html += '<td>'+fmtValue(v, cols[c])+'</td>';
             }
             html += '</tr>';
         }

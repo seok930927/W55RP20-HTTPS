@@ -204,15 +204,17 @@ void start_task(void *argument) {
     set_W5X00_NetTimeout();
     Timer_Configuration();
 
-    /* ── Sensor bank: demo entries (TEST) ─────────────────────────────── */
-    // 200개 TEST용 센서 인스턴스 할당. 실제 제품에서는 UART/Modbus 등으로 동적 할당될 예정.
-    sensor_init();
+    /* ── Device bank: demo entries (TEST) ─────────────────────────────── */
+    // TEST용 디바이스 초기화. 실제 제품에서는 UART(S/T 명령)로 값이 들어옴.
+    device_init();
 
-    for (uint8_t i = 0; i < 255; i++) {
-        char name[16];
-        snprintf(name, sizeof(name), "Sensor %d", i);
-        sensor_assign(i, TYPE_ID_TEMPERATURE, name);
-        sensor_setValue(i, 200 + i); // 20.0 °C ~ 20.9 °C
+    for (uint8_t d = 0; d < DEVICE_COUNT; d++) {
+        char name[DEVICE_NAME_MAX];
+        snprintf(name, sizeof(name), "Device %d", d + 1);
+        device_assign(d, name);
+        device_setValue(d, 0, 235 + d);   /* col 0 — temperature  23.5C~ */
+        device_setValue(d, 1, 600 + d);   /* col 1 — humidity     60.0%~ */
+        device_setValue(d, 2, d & 1);     /* col 2 — alarm        0 / 1   */
     }
 
     /* ── UART RX → sensor bank ingestion ─────────────────────────────── */
