@@ -1,9 +1,16 @@
-warning: in the working copy of 'Internet/SNMP/snmp_custom.c', LF will be replaced by CRLF the next time Git touches it
 diff --git a/Internet/SNMP/snmp.c b/Internet/SNMP/snmp.c
-index b705097..95ee3d7 100644
+index b705097..cf64b88 100644
 --- a/Internet/SNMP/snmp.c
 +++ b/Internet/SNMP/snmp.c
-@@ -25,6 +25,8 @@ void insertRespLen(int32_t reqStart, int32_t respStart, int32_t size);
+@@ -13,6 +13,7 @@
+ /********************************************************************************************/
+ // SNMP Parsing functions
+ int32_t findEntry(uint8_t *oid, int32_t len);
++int32_t findNextEntry(uint8_t *oid, int32_t len);
+ int32_t getOID(int32_t id, uint8_t *oid, uint8_t *len);
+ int32_t getValue( uint8_t *vptr, int32_t vlen);
+ int32_t getEntry(int32_t id, uint8_t *dataType, void *ptr, int32_t *len);
+@@ -25,6 +26,8 @@ void insertRespLen(int32_t reqStart, int32_t respStart, int32_t size);
  int32_t parseVarBind(int32_t reqType, int32_t index);
  int32_t parseSequence(int32_t reqType, int32_t index);
  int32_t parseSequenceOf(int32_t reqType);
@@ -12,7 +19,7 @@ index b705097..95ee3d7 100644
  int32_t parseRequest();
  int32_t parseCommunity();
  int32_t parseVersion();
-@@ -55,6 +57,17 @@ static uint8_t SOCK_SNMP_TRAP;
+@@ -55,6 +58,17 @@ static uint8_t SOCK_SNMP_TRAP;
  
  uint8_t packet_trap[MAX_TRAPMSG_LEN] = {0,};
  uint8_t errorStatus, errorIndex;
@@ -30,7 +37,7 @@ index b705097..95ee3d7 100644
  
  
  /********************************************************************************************/
-@@ -105,12 +118,19 @@ void snmpd_init(uint8_t * managerIP, uint8_t * agentIP, uint8_t sn_agent, uint8_
+@@ -105,12 +119,19 @@ void snmpd_init(uint8_t * managerIP, uint8_t * agentIP, uint8_t sn_agent, uint8_
      SOCK_SNMP_AGENT = sn_agent;
      SOCK_SNMP_TRAP = sn_trap;
  
@@ -53,7 +60,7 @@ index b705097..95ee3d7 100644
  
  /*
      // Example Codes for SNMP Trap
-@@ -150,7 +170,7 @@ int32_t snmpd_run(void)
+@@ -150,7 +171,7 @@ int32_t snmpd_run(void)
  	uint8_t svr_addr[6];
  	uint16_t  svr_port;
  
@@ -62,7 +69,7 @@ index b705097..95ee3d7 100644
      
  	switch(getSn_SR(SOCK_SNMP_AGENT))
  	{
-@@ -158,6 +178,11 @@ int32_t snmpd_run(void)
+@@ -158,6 +179,11 @@ int32_t snmpd_run(void)
  			if ( (len = getSn_RX_RSR(SOCK_SNMP_AGENT)) > 0)
  			{
  				request_msg.len= recvfrom(SOCK_SNMP_AGENT, request_msg.buffer, len, svr_addr, &svr_port);
@@ -74,7 +81,45 @@ index b705097..95ee3d7 100644
  			}
  			else
  			{
-@@ -336,7 +361,7 @@ int32_t setEntry(int32_t id, void *val, int32_t vlen, uint8_t dataType, int32_t
+@@ -220,6 +246,37 @@ int32_t findEntry(uint8_t *oid, int32_t len)
+ }
+ 
+ 
++/* Lexicographic compare of two BER-encoded OIDs. <0, 0, >0 like memcmp.
++   Shorter OID sorts before a longer one that shares its prefix. */
++static int32_t oidCompare(const uint8_t *a, int32_t alen,
++                          const uint8_t *b, int32_t blen)
++{
++	int32_t n = (alen < blen) ? alen : blen;
++	int32_t r = memcmp(a, b, (size_t)n);
++
++	if (r != 0) return r;
++	return alen - blen;
++}
++
++
++/* GET-NEXT lookup: return the index of the first snmpData[] entry whose OID is
++   lexicographically greater than the requested OID. snmpData[] is kept in
++   ascending OID order, so a linear scan suffices. Returns maxData when the
++   requested OID is at or past the end of the MIB (end-of-MIB-view). */
++int32_t findNextEntry(uint8_t *oid, int32_t len)
++{
++	int32_t i;
++
++	for (i = 0 ; i < maxData ; i++)
++	{
++		if (oidCompare(snmpData[i].oid, snmpData[i].oidlen, oid, len) > 0)
++			return i;
++	}
++
++	return maxData;
++}
++
++
+ int32_t getOID(int32_t id, uint8_t *oid, uint8_t *len)
+ {
+ 	int32_t j;
+@@ -336,7 +393,7 @@ int32_t setEntry(int32_t id, void *val, int32_t vlen, uint8_t dataType, int32_t
  
  	if (snmpData[id].dataType != dataType)
  	{
@@ -83,7 +128,7 @@ index b705097..95ee3d7 100644
  		errorIndex = index;
  		return INVALID_DATA_TYPE;
  	}
-@@ -423,6 +448,7 @@ int32_t parseTLV(const uint8_t *msg, int32_t index, tlvStructType *tlv)
+@@ -423,6 +480,7 @@ int32_t parseTLV(const uint8_t *msg, int32_t index, tlvStructType *tlv)
  	case GET_REQUEST:
  	case GET_NEXT_REQUEST:
  	case SET_REQUEST:
@@ -91,7 +136,21 @@ index b705097..95ee3d7 100644
  		tlv->nstart = tlv->vstart;
  		break;
  	default:
-@@ -530,11 +556,24 @@ int32_t parseVarBind(int32_t reqType, int32_t index)
+@@ -483,7 +541,12 @@ int32_t parseVarBind(int32_t reqType, int32_t index)
+ 	{
+ 		response_msg.buffer[response_msg.index] = request_msg.buffer[name.start];
+ 
+-		if (++id >= maxData)
++		/* True lexicographic GET-NEXT: the request OID is usually a subtree
++		   prefix (e.g. snmpwalk), not an exact entry, so findEntry() cannot
++		   resolve it. findNextEntry() returns the next entry directly. */
++		id = findNextEntry(&request_msg.buffer[name.vstart], name.len);
++
++		if (id >= maxData)
+ 		{
+ 			id = OID_NOT_FOUND;
+ 			seglen = name.nstart - name.start;
+@@ -530,11 +593,24 @@ int32_t parseVarBind(int32_t reqType, int32_t index)
  	}
  	else
  	{
@@ -120,7 +179,7 @@ index b705097..95ee3d7 100644
  	}
  
  	size += seglen;
-@@ -565,6 +604,136 @@ int32_t parseSequence(int32_t reqType, int32_t index)
+@@ -565,6 +641,136 @@ int32_t parseSequence(int32_t reqType, int32_t index)
  }
  
  
@@ -205,8 +264,8 @@ index b705097..95ee3d7 100644
 +		orig_oid_lens[var_count] = (uint8_t)name.len;
 +		memcpy(orig_oids[var_count], &request_msg.buffer[name.vstart], name.len);
 +
-+		int32_t id = findEntry(&request_msg.buffer[name.vstart], name.len);
-+		cur_ids[var_count] = id + 1; // GET-NEXT: advance past found entry
++		int32_t id = findNextEntry(&request_msg.buffer[name.vstart], name.len);
++		cur_ids[var_count] = id; // findNextEntry() already yields the next entry
 +		eom[var_count] = (cur_ids[var_count] >= maxData) ? 1 : 0;
 +
 +		request_msg.index = seq.nstart;
@@ -257,7 +316,7 @@ index b705097..95ee3d7 100644
  int32_t parseSequenceOf(int32_t reqType)
  {
  	int32_t seglen;
-@@ -625,7 +794,23 @@ int32_t parseRequest()
+@@ -625,7 +831,23 @@ int32_t parseRequest()
  	size += seglen;
  	COPY_SEGMENT(errIndex);
  
@@ -282,7 +341,7 @@ index b705097..95ee3d7 100644
  	if (ret == -1) return -1;
  	else size += ret;
  
-@@ -678,8 +863,9 @@ int32_t parseVersion()
+@@ -678,8 +900,9 @@ int32_t parseVersion()
  
  	size = parseTLV(request_msg.buffer, request_msg.index, &tlv);
  
@@ -294,7 +353,7 @@ index b705097..95ee3d7 100644
  
  	seglen = tlv.nstart - tlv.start;
  	size += seglen;
-@@ -879,12 +1065,119 @@ int32_t snmp_sendTrap(uint8_t * managerIP, uint8_t * agentIP, int8_t* community,
+@@ -879,12 +1102,119 @@ int32_t snmp_sendTrap(uint8_t * managerIP, uint8_t * agentIP, int8_t* community,
  	{
  		socket(SOCK_SNMP_TRAP, Sn_MR_UDP, PORT_SNMP_TRAP, 0);
  		sendto(SOCK_SNMP_TRAP, packet_trap, packet_index, managerIP, PORT_SNMP_TRAP);
@@ -491,10 +550,10 @@ index 02c83fd..9cc1ba6 100644
  // SNMP Time handler functions
  void SNMP_time_handler(void);
 diff --git a/Internet/SNMP/snmp_custom.c b/Internet/SNMP/snmp_custom.c
-index 68590c7..54dbdcb 100644
+index 68590c7..c0bc204 100644
 --- a/Internet/SNMP/snmp_custom.c
 +++ b/Internet/SNMP/snmp_custom.c
-@@ -1,147 +1,227 @@
+@@ -1,147 +1,198 @@
 -
 -/********************************************************************************************
 - * SNMP : User Customization Part
@@ -507,128 +566,17 @@ index 68590c7..54dbdcb 100644
 - *
 - *********************************************************************************************/
  #include "snmp_custom.h"
--
++#include "sensor.h"
++#include <string.h>
+ 
 -#ifdef _USE_WIZNET_W5500_EVB_
 -	#include "board.h"
 -#endif
-+#include "snmpBuffer.h"
-+
-+// ---------------------------------------------------------------------------
-+// SNMP get callbacks
-+// OID 콜백 서명: void fn(void *ptr, uint8_t *len)
-+//   ptr  → snmpData[id].u.intval 의 주소 (uint32_t*)
-+//   *len → 응답 바이트 수 (INTEGER = 4)
-+// ---------------------------------------------------------------------------
-+
-+#define SNMP_GET_TEMP(n) \
-+    static void snmp_get_temp##n(void *ptr, uint8_t *len) { \
-+        *(uint32_t *)(ptr) = (uint32_t)(g_snmp_sensor.temperature[(n) - 1]); \
-+        *(len) = 4; \
-+    }
-+
-+#define SNMP_GET_HUMID(n) \
-+    static void snmp_get_humid##n(void *ptr, uint8_t *len) { \
-+        *(uint32_t *)(ptr) = g_snmp_sensor.humidity[(n) - 1]; \
-+        *(len) = 4; \
-+    }
-+
-+#define SNMP_GET_ALARM(n) \
-+    static void snmp_get_alarm##n(void *ptr, uint8_t *len) { \
-+        *(uint32_t *)(ptr) = g_snmp_sensor.alarm[(n) - 1]; \
-+        *(len) = 4; \
-+    }
-+
-+#define SNMP_GET_SENSOR(n) \
-+    static void snmp_get_sensor##n(void *ptr, uint8_t *len) { \
-+        *(uint32_t *)(ptr) = g_snmp_sensor.sensor_status[(n) - 1]; \
-+        *(len) = 4; \
-+    }
-+
-+// set 콜백 서명: void fn(int32_t val)
-+//   val → 매니저가 SET한 값
-+
-+#define SNMP_SET_TEMP(n) \
-+    static void snmp_set_temp##n(int32_t val) { \
-+        g_snmp_sensor.temperature[(n) - 1] = val; \
-+    }
-+
-+#define SNMP_SET_HUMID(n) \
-+    static void snmp_set_humid##n(int32_t val) { \
-+        g_snmp_sensor.humidity[(n) - 1] = (uint32_t)val; \
-+    }
-+
-+#define SNMP_SET_ALARM(n) \
-+    static void snmp_set_alarm##n(int32_t val) { \
-+        g_snmp_sensor.alarm[(n) - 1] = (uint32_t)val; \
-+    }
-+
-+#define SNMP_SET_SENSOR(n) \
-+    static void snmp_set_sensor##n(int32_t val) { \
-+        g_snmp_sensor.sensor_status[(n) - 1] = (uint32_t)val; \
-+    }
-+
-+SNMP_GET_TEMP(1)  SNMP_GET_TEMP(2)  SNMP_GET_TEMP(3)  SNMP_GET_TEMP(4)
-+SNMP_GET_TEMP(5)  SNMP_GET_TEMP(6)  SNMP_GET_TEMP(7)  SNMP_GET_TEMP(8)
-+SNMP_SET_TEMP(1)  SNMP_SET_TEMP(2)  SNMP_SET_TEMP(3)  SNMP_SET_TEMP(4)
-+SNMP_SET_TEMP(5)  SNMP_SET_TEMP(6)  SNMP_SET_TEMP(7)  SNMP_SET_TEMP(8)
-+
-+SNMP_GET_HUMID(1) SNMP_GET_HUMID(2) SNMP_GET_HUMID(3) SNMP_GET_HUMID(4)
-+SNMP_GET_HUMID(5) SNMP_GET_HUMID(6) SNMP_GET_HUMID(7) SNMP_GET_HUMID(8)
-+SNMP_SET_HUMID(1) SNMP_SET_HUMID(2) SNMP_SET_HUMID(3) SNMP_SET_HUMID(4)
-+SNMP_SET_HUMID(5) SNMP_SET_HUMID(6) SNMP_SET_HUMID(7) SNMP_SET_HUMID(8)
-+
-+SNMP_GET_ALARM(1) SNMP_GET_ALARM(2) SNMP_GET_ALARM(3) SNMP_GET_ALARM(4)
-+SNMP_GET_ALARM(5) SNMP_GET_ALARM(6) SNMP_GET_ALARM(7) SNMP_GET_ALARM(8)
-+SNMP_SET_ALARM(1) SNMP_SET_ALARM(2) SNMP_SET_ALARM(3) SNMP_SET_ALARM(4)
-+SNMP_SET_ALARM(5) SNMP_SET_ALARM(6) SNMP_SET_ALARM(7) SNMP_SET_ALARM(8)
-+
-+SNMP_GET_SENSOR(1)  SNMP_GET_SENSOR(2)  SNMP_GET_SENSOR(3)
-+SNMP_GET_SENSOR(4)  SNMP_GET_SENSOR(5)  SNMP_GET_SENSOR(6)
-+SNMP_GET_SENSOR(7)  SNMP_GET_SENSOR(8)  SNMP_GET_SENSOR(9)
-+SNMP_GET_SENSOR(10) SNMP_GET_SENSOR(11) SNMP_GET_SENSOR(12)
-+SNMP_SET_SENSOR(1)  SNMP_SET_SENSOR(2)  SNMP_SET_SENSOR(3)
-+SNMP_SET_SENSOR(4)  SNMP_SET_SENSOR(5)  SNMP_SET_SENSOR(6)
-+SNMP_SET_SENSOR(7)  SNMP_SET_SENSOR(8)  SNMP_SET_SENSOR(9)
-+SNMP_SET_SENSOR(10) SNMP_SET_SENSOR(11) SNMP_SET_SENSOR(12)
-+
-+static void snmp_get_comm_status(void *ptr, uint8_t *len)
-+    { *(uint32_t *)(ptr) = g_snmp_sensor.comm_status;   *(len) = 4; }
-+static void snmp_get_recv_checksum(void *ptr, uint8_t *len)
-+    { *(uint32_t *)(ptr) = g_snmp_sensor.recv_checksum; *(len) = 4; }
-+static void snmp_get_calc_checksum(void *ptr, uint8_t *len)
-+    { *(uint32_t *)(ptr) = g_snmp_sensor.calc_checksum; *(len) = 4; }
-+static void snmp_get_comm_check(void *ptr, uint8_t *len)
-+    { *(uint32_t *)(ptr) = g_snmp_sensor.comm_check;    *(len) = 4; }
-+static void snmp_get_comm_flag(void *ptr, uint8_t *len)
-+    { *(uint32_t *)(ptr) = g_snmp_sensor.comm_flag;     *(len) = 4; }
-+
-+static void snmp_set_comm_status(int32_t val)
-+    { g_snmp_sensor.comm_status    = (uint32_t)val; }
-+static void snmp_set_recv_checksum(int32_t val)
-+    { g_snmp_sensor.recv_checksum  = (uint32_t)val; }
-+static void snmp_set_calc_checksum(int32_t val)
-+    { g_snmp_sensor.calc_checksum  = (uint32_t)val; }
-+static void snmp_set_comm_check(int32_t val)
-+    { g_snmp_sensor.comm_check     = (uint32_t)val; }
-+static void snmp_set_comm_flag(int32_t val)
-+    { g_snmp_sensor.comm_flag      = (uint32_t)val; }
-+
-+// ---------------------------------------------------------------------------
-+// OID 테이블
-+// Enterprise OID 기반: 1.3.6.1.4.1.19865 (WIZnet)
-+//   BER 접두사: {0x2b,0x06,0x01,0x04,0x01,0x81,0x9b,0x19} (8 bytes)
-+//
-+// 센서 브랜치: .2.카테고리.인덱스  (총 11 bytes)
-+//   카테고리: 0x01=온도 0x02=습도 0x03=경보 0x04=센서상태 0x05=통신
-+// ---------------------------------------------------------------------------
-+
-+// OID 엔트리 매크로 (센서 전용, 11 bytes)
-+#define S_OID(cat, idx, getter, setter) \
-+    {11, {0x2b,0x06,0x01,0x04,0x01,0x81,0x9b,0x19,0x02,(cat),(idx)}, \
-+     SNMPDTYPE_INTEGER, 0, {""}, (getter), (setter)}
++/* ===========================================================================
++    SNMP custom MIB — standard conceptual table for the DEVICE bank.
  
- dataEntryType snmpData[] =
- {
+-dataEntryType snmpData[] =
+-{
 -    // System MIB
 -	// SysDescr Entry
 -	{8, {0x2b, 6, 1, 2, 1, 1, 1, 0},
@@ -701,145 +649,188 @@ index 68590c7..54dbdcb 100644
 -	{0x0a, {0x2b, 0x06, 0x01, 0x04, 0x01, 0x81, 0xad, 0x42, 0x02, 0x00},
 -	SNMPDTYPE_OBJ_ID, 0x0a, {"\x2b\x06\x01\x04\x01\x81\xad\x42\x02\x00"},
 -	NULL, NULL},
-+    // -----------------------------------------------------------------------
-+    // System MIB  (1.3.6.1.2.1.1.x.0)
-+    // -----------------------------------------------------------------------
-+    {8, {0x2b,6,1,2,1,1,1,0}, SNMPDTYPE_OCTET_STRING, 30,
-+     {"W55RP20-S2E SNMP Agent"}, NULL, NULL},
-+
-+    {8, {0x2b,6,1,2,1,1,2,0}, SNMPDTYPE_OBJ_ID, 0x0a,
-+     {"\x2b\x06\x01\x04\x01\x81\x9b\x19\x01\x00"}, NULL, NULL},
-+
-+    {8, {0x2b,6,1,2,1,1,3,0}, SNMPDTYPE_TIME_TICKS, 0,
-+     {""}, currentUptime, NULL},
-+
-+    {8, {0x2b,6,1,2,1,1,4,0}, SNMPDTYPE_OCTET_STRING, 30,
-+     {"WIZnet"}, NULL, NULL},
-+
-+    {8, {0x2b,6,1,2,1,1,5,0}, SNMPDTYPE_OCTET_STRING, 30,
-+     {"W55RP20-S2E"}, NULL, NULL},
-+
-+    {8, {0x2b,6,1,2,1,1,6,0}, SNMPDTYPE_OCTET_STRING, 30,
-+     {"Unspecified"}, NULL, NULL},
-+
-+    {8, {0x2b,6,1,2,1,1,7,0}, SNMPDTYPE_INTEGER, 4,
-+     {""}, NULL, NULL},
-+
-+    // -----------------------------------------------------------------------
-+    // 온도  1.3.6.1.4.1.19865.2.1.x  (×10, 예: 256 = 25.6℃)
-+    // -----------------------------------------------------------------------
-+    S_OID(0x01, 0x01, snmp_get_temp1, snmp_set_temp1),
-+    S_OID(0x01, 0x02, snmp_get_temp2, snmp_set_temp2),
-+    S_OID(0x01, 0x03, snmp_get_temp3, snmp_set_temp3),
-+    S_OID(0x01, 0x04, snmp_get_temp4, snmp_set_temp4),
-+    S_OID(0x01, 0x05, snmp_get_temp5, snmp_set_temp5),
-+    S_OID(0x01, 0x06, snmp_get_temp6, snmp_set_temp6),
-+    S_OID(0x01, 0x07, snmp_get_temp7, snmp_set_temp7),
-+    S_OID(0x01, 0x08, snmp_get_temp8, snmp_set_temp8),
-+
-+    // -----------------------------------------------------------------------
-+    // 습도  1.3.6.1.4.1.19865.2.2.x  (×10, 예: 650 = 65.0%)
-+    // -----------------------------------------------------------------------
-+    S_OID(0x02, 0x01, snmp_get_humid1, snmp_set_humid1),
-+    S_OID(0x02, 0x02, snmp_get_humid2, snmp_set_humid2),
-+    S_OID(0x02, 0x03, snmp_get_humid3, snmp_set_humid3),
-+    S_OID(0x02, 0x04, snmp_get_humid4, snmp_set_humid4),
-+    S_OID(0x02, 0x05, snmp_get_humid5, snmp_set_humid5),
-+    S_OID(0x02, 0x06, snmp_get_humid6, snmp_set_humid6),
-+    S_OID(0x02, 0x07, snmp_get_humid7, snmp_set_humid7),
-+    S_OID(0x02, 0x08, snmp_get_humid8, snmp_set_humid8),
-+
-+    // -----------------------------------------------------------------------
-+    // 경보  1.3.6.1.4.1.19865.2.3.x  (1=정상, 2=경보)
-+    // -----------------------------------------------------------------------
-+    S_OID(0x03, 0x01, snmp_get_alarm1, snmp_set_alarm1),
-+    S_OID(0x03, 0x02, snmp_get_alarm2, snmp_set_alarm2),
-+    S_OID(0x03, 0x03, snmp_get_alarm3, snmp_set_alarm3),
-+    S_OID(0x03, 0x04, snmp_get_alarm4, snmp_set_alarm4),
-+    S_OID(0x03, 0x05, snmp_get_alarm5, snmp_set_alarm5),
-+    S_OID(0x03, 0x06, snmp_get_alarm6, snmp_set_alarm6),
-+    S_OID(0x03, 0x07, snmp_get_alarm7, snmp_set_alarm7),
-+    S_OID(0x03, 0x08, snmp_get_alarm8, snmp_set_alarm8),
-+
-+    // -----------------------------------------------------------------------
-+    // 센서 상태  1.3.6.1.4.1.19865.2.4.x  (1=정상, 2=경보)
-+    // -----------------------------------------------------------------------
-+    S_OID(0x04, 0x01, snmp_get_sensor1,  snmp_set_sensor1),
-+    S_OID(0x04, 0x02, snmp_get_sensor2,  snmp_set_sensor2),
-+    S_OID(0x04, 0x03, snmp_get_sensor3,  snmp_set_sensor3),
-+    S_OID(0x04, 0x04, snmp_get_sensor4,  snmp_set_sensor4),
-+    S_OID(0x04, 0x05, snmp_get_sensor5,  snmp_set_sensor5),
-+    S_OID(0x04, 0x06, snmp_get_sensor6,  snmp_set_sensor6),
-+    S_OID(0x04, 0x07, snmp_get_sensor7,  snmp_set_sensor7),
-+    S_OID(0x04, 0x08, snmp_get_sensor8,  snmp_set_sensor8),
-+    S_OID(0x04, 0x09, snmp_get_sensor9,  snmp_set_sensor9),
-+    S_OID(0x04, 0x0a, snmp_get_sensor10, snmp_set_sensor10),
-+    S_OID(0x04, 0x0b, snmp_get_sensor11, snmp_set_sensor11),
-+    S_OID(0x04, 0x0c, snmp_get_sensor12, snmp_set_sensor12),
-+
-+    // -----------------------------------------------------------------------
-+    // 통신  1.3.6.1.4.1.19865.2.5.x
-+    //   .1 = 통신상태 (0=정상, 2=이상)
-+    //   .2 = 수신체크섬
-+    //   .3 = 계산체크섬
-+    //   .4 = 통신체크
-+    //   .5 = 통신플래그
-+    // -----------------------------------------------------------------------
-+    S_OID(0x05, 0x01, snmp_get_comm_status,    snmp_set_comm_status),
-+    S_OID(0x05, 0x02, snmp_get_recv_checksum,  snmp_set_recv_checksum),
-+    S_OID(0x05, 0x03, snmp_get_calc_checksum,  snmp_set_calc_checksum),
-+    S_OID(0x05, 0x04, snmp_get_comm_check,     snmp_set_comm_check),
-+    S_OID(0x05, 0x05, snmp_get_comm_flag,      snmp_set_comm_flag),
- };
- 
- const int32_t maxData = (sizeof(snmpData) / sizeof(dataEntryType));
- 
+-};
+-
+-const int32_t maxData = (sizeof(snmpData) / sizeof(dataEntryType));
+-
 -void initTable()
 -{
 -	// Example integer value for [OID 1.3.6.1.2.1.1.7.0]
 -	snmpData[6].u.intval = -5;
--
++        deviceTable  = 1.3.6.1.4.1.19865.2
++        deviceEntry  = 1.3.6.1.4.1.19865.2.1
++        cell         = 1.3.6.1.4.1.19865.2.1.<column>.<row>
+ 
 -}
--
--
++        row    = device          (1 .. DEVICE_COUNT)
++        column 1            deviceIndex   INTEGER       row number
++        column 2            deviceName    OCTET STRING  user-given name
++        column 3 .. 2+N     value[0..N-1] INTEGER       N = DEVICE_VALUE_COLS
+ 
++    Each value column has a fixed meaning (col 3 = value[0] = Temperature,
++    col 4 = value[1] = Humidity, ...) defined by g_value_columns[] in
++    sensor.c. To change the device schema, edit DEVICE_VALUE_COLS and that
++    array — this file regenerates the table automatically.
+ 
 -// W5500-EVB: LED Control ///////////////////////////////////////////////////////////////////////////
 -#ifdef _USE_WIZNET_W5500_EVB_
 -void get_LEDStatus_all(void *ptr, uint8_t *len)
-+void initTable(void)
- {
+-{
 -	uint8_t led_status[3] = {0, };
--
++    snmpData[] is a RAM table built once by initTable():
++      [0 .. 6]                          System MIB
++      [7 .. 7 + COLS*ROWS - 1]          table cells, column-major order
++
++    Column-major order keeps snmpData[] in ascending-OID order, which the
++    GET-NEXT walk in snmp.c relies on.
++
++    OID length note: MAX_OID = 12. A cell OID is exactly 12 bytes when both
++    the column and row sub-identifiers are < 128, so DEVICE_COUNT <= 127 and
++    (2 + DEVICE_VALUE_COLS) <= 127.
++
++    NOTE: this file is part of the ioLibrary_Driver submodule. After editing,
++    regenerate ioLibrary_snmp_patch.patch.
++   =========================================================================== */
++
++#define SYSTEM_OID_COUNT    7
+ 
 -	led_status[LED_R] = (uint8_t)Board_LED_Test(LED_R);
 -	led_status[LED_G] = (uint8_t)Board_LED_Test(LED_G);
 -	led_status[LED_B] = (uint8_t)Board_LED_Test(LED_B);
--
++/* Device table column numbers */
++#define DEV_COL_INDEX       1
++#define DEV_COL_NAME        2
++#define DEV_COL_VALUE_BASE  3                            /* value[V] -> col (3 + V) */
+ 
 -	*len = sprintf((char *)ptr, "LED R [%s] / G [%s] / B [%s]", led_status[LED_R]?"On":"Off", led_status[LED_G]?"On":"Off", led_status[LED_B]?"On":"Off");
-+    snmpData[6].u.intval = 70; // sysServices: datalink + internet + applications
++#define DEV_TABLE_COLS      (2 + DEVICE_VALUE_COLS)
++#define DEV_TABLE_ROWS      DEVICE_COUNT
++
++dataEntryType snmpData[SYSTEM_OID_COUNT + DEV_TABLE_COLS * DEV_TABLE_ROWS];
++const int32_t maxData = SYSTEM_OID_COUNT + DEV_TABLE_COLS * DEV_TABLE_ROWS;
++
++/* snmpData[] index of cell (col 1-based, row 1-based) — column-major */
++#define CELL_IDX(col, row) \
++    (SYSTEM_OID_COUNT + ((col) - 1) * DEV_TABLE_ROWS + ((row) - 1))
++
++/* deviceEntry prefix: 1.3.6.1.4.1.19865.2.1  (10 BER bytes) */
++static const uint8_t ENTRY_OID_PREFIX[10] =
++    { 0x2b, 0x06, 0x01, 0x04, 0x01, 0x81, 0x9b, 0x19, 0x02, 0x01 };
++
++/* Enterprise notification OID: 1.3.6.1.4.1.19865.0.1  (device value change) */
++static const uint8_t NOTIFY_OID[10] =
++    { 0x2b, 0x06, 0x01, 0x04, 0x01, 0x81, 0x9b, 0x19, 0x00, 0x01 };
++
++/* Build cell OID: <entry-prefix>.<col>.<row>  -> always 12 bytes. */
++static void build_cell_oid(uint8_t *dst, uint8_t col, uint8_t row) {
++    memcpy(dst, ENTRY_OID_PREFIX, 10);
++    dst[10] = col;
++    dst[11] = row;
  }
  
 -void set_LEDStatus_R(int32_t val)
-+void initial_Trap(uint8_t *managerIP, uint8_t *agentIP)
- {
+-{
 -	if(val == 0) 	Board_LED_Set(LED_R, false);
 -	else 			Board_LED_Set(LED_R, true);
--}
--
++/* Fill one System MIB entry (OID 1.3.6.1.2.1.1.<leaf>.0). */
++static void set_system_entry(int idx, uint8_t leaf, uint8_t dtype,
++                             const char *data, uint8_t dlen) {
++    dataEntryType *e = &snmpData[idx];
++
++    e->oidlen = 8;
++    e->oid[0] = 0x2b; e->oid[1] = 6; e->oid[2] = 1; e->oid[3] = 2;
++    e->oid[4] = 1;    e->oid[5] = 1; e->oid[6] = leaf; e->oid[7] = 0;
++
++    e->dataType = dtype;
++    e->dataLen  = dlen;
++    memset(e->u.octetstring, 0, MAX_STRING);
++    if (data && dlen > 0) {
++        memcpy(e->u.octetstring, data, dlen);
++    }
++    e->getfunction = NULL;
++    e->setfunction = NULL;
+ }
+ 
 -void set_LEDStatus_G(int32_t val)
--{
++void initTable(void)
+ {
 -	if(val == 0) 	Board_LED_Set(LED_G, false);
 -	else 			Board_LED_Set(LED_G, true);
--}
--
++    /* ---- System MIB : 1.3.6.1.2.1.1.x.0 ---- */
++    set_system_entry(0, 1, SNMPDTYPE_OCTET_STRING,
++                     "W55RP20-S2E SNMP Agent", 22);
++    set_system_entry(1, 2, SNMPDTYPE_OBJ_ID,
++                     "\x2b\x06\x01\x04\x01\x81\x9b\x19\x01\x00", 10);
++    set_system_entry(2, 3, SNMPDTYPE_TIME_TICKS, NULL, 0);
++    snmpData[2].getfunction = currentUptime;
++    set_system_entry(3, 4, SNMPDTYPE_OCTET_STRING, "WIZnet", 6);
++    set_system_entry(4, 5, SNMPDTYPE_OCTET_STRING, "W55RP20-S2E", 11);
++    set_system_entry(5, 6, SNMPDTYPE_OCTET_STRING, "Unspecified", 11);
++    set_system_entry(6, 7, SNMPDTYPE_INTEGER, NULL, 4);
++    snmpData[6].u.intval = 70;   /* sysServices */
++
++    /* ---- deviceTable cells, column-major ---- */
++    for (uint8_t col = 1; col <= DEV_TABLE_COLS; col++) {
++        for (uint8_t row = 1; row <= DEV_TABLE_ROWS; row++) {
++            dataEntryType *e = &snmpData[CELL_IDX(col, row)];
++
++            e->oidlen = 12;
++            build_cell_oid(e->oid, col, row);
++            e->getfunction = NULL;   /* values synced by snmp_custom_refresh() */
++            e->setfunction = NULL;   /* read-only table */
++
++            if (col == DEV_COL_NAME) {
++                e->dataType = SNMPDTYPE_OCTET_STRING;
++                e->dataLen  = 0;
++                memset(e->u.octetstring, 0, MAX_STRING);
++            } else {
++                e->dataType = SNMPDTYPE_INTEGER;
++                e->dataLen  = 4;
++                e->u.intval = 0;
++            }
++        }
++    }
+ }
+ 
 -void set_LEDStatus_B(int32_t val)
--{
++/* Sync g_devices[] -> table cells. Call before each snmpd_run(). */
++void snmp_custom_refresh(void)
+ {
 -	if(val == 0) 	Board_LED_Set(LED_B, false);
 -	else 			Board_LED_Set(LED_B, true);
--}
++    for (uint8_t row = 1; row <= DEV_TABLE_ROWS; row++) {
++        const Device *d = device_get((uint8_t)(row - 1));
++
++        /* col 1 — deviceIndex (row number) */
++        snmpData[CELL_IDX(DEV_COL_INDEX, row)].u.intval = row;
++
++        /* col 2 — deviceName */
++        dataEntryType *nd = &snmpData[CELL_IDX(DEV_COL_NAME, row)];
++        if (d != NULL && d->enabled) {
++            strncpy((char *)nd->u.octetstring, d->name, MAX_STRING - 1);
++            nd->u.octetstring[MAX_STRING - 1] = '\0';
++        } else {
++            nd->u.octetstring[0] = '\0';
++        }
++        nd->dataLen = (uint8_t)strlen((char *)nd->u.octetstring);
++
++        /* value columns 0 .. DEVICE_VALUE_COLS-1 */
++        for (uint8_t v = 0; v < DEVICE_VALUE_COLS; v++) {
++            int32_t val = (d != NULL) ? d->value[v] : 0;
++            snmpData[CELL_IDX(DEV_COL_VALUE_BASE + v, row)].u.intval =
++                (uint32_t)val;
++        }
++    }
+ }
 -#endif
 -/////////////////////////////////////////////////////////////////////////////////////////////////////
--
+ 
 -void initial_Trap(uint8_t * managerIP, uint8_t * agentIP)
--{
++/* Send a v2c trap carrying one device value cell (device 0-based, col 0-based). */
++void snmp_custom_sendValueTrap(const uint8_t *managerIP,
++                               const uint8_t *agentIP,
++                               uint8_t dev, uint8_t col)
+ {
 -	// SNMP Trap: WarmStart(1) Trap
 -	{
 -		dataEntryType enterprise_oid = {0x0a, {0x2b, 0x06, 0x01, 0x04, 0x01, 0x81, 0x9b, 0x19, 0x01, 0x00},
@@ -847,7 +838,38 @@ index 68590c7..54dbdcb 100644
 -		// Generic Trap: warmStart COMMUNITY
 -		snmp_sendTrap(managerIP, agentIP, (void *)COMMUNITY, enterprise_oid, SNMPTRAP_WARMSTART, 0, 0);
 -	}
--
++    int32_t value;
++
++    if (dev >= DEVICE_COUNT || col >= DEVICE_VALUE_COLS) {
++        return;
++    }
++    if (device_getValue(dev, col, &value) != 0) {
++        return;
++    }
++
++    /* VarBind: value cell  1.3.6.1.4.1.19865.2.1.<col>.<row> */
++    dataEntryType vb;
++    memset(&vb, 0, sizeof(vb));
++    vb.oidlen   = 12;
++    build_cell_oid(vb.oid, (uint8_t)(DEV_COL_VALUE_BASE + col),
++                   (uint8_t)(dev + 1));
++    vb.dataType = SNMPDTYPE_INTEGER;
++    vb.dataLen  = 4;
++    vb.u.intval = (uint32_t)value;
++
++    dataEntryType enterprise_oid;
++    memset(&enterprise_oid, 0, sizeof(enterprise_oid));
++    enterprise_oid.oidlen   = sizeof(NOTIFY_OID);
++    memcpy(enterprise_oid.oid, NOTIFY_OID, sizeof(NOTIFY_OID));
++    enterprise_oid.dataType = SNMPDTYPE_OBJ_ID;
++
++    /* genericTrap = 6 (enterpriseSpecific) -> trapOID = enterprise_oid */
++    snmp_sendTrapV2c((uint8_t *)managerIP, (uint8_t *)agentIP, (void *)COMMUNITY,
++                     enterprise_oid, 6, 0, 1, &vb);
++}
+ 
++void initial_Trap(uint8_t *managerIP, uint8_t *agentIP)
++{
 +    dataEntryType enterprise_oid = {
 +        0x0a, {0x2b,0x06,0x01,0x04,0x01,0x81,0x9b,0x19,0x01,0x00},
 +        SNMPDTYPE_OBJ_ID, 0x0a, {"\x2b\x06\x01\x04\x01\x81\x9b\x19\x10\x00"},
@@ -856,3 +878,24 @@ index 68590c7..54dbdcb 100644
 +    snmp_sendTrap(managerIP, agentIP, (void *)COMMUNITY,
 +                  enterprise_oid, SNMPTRAP_WARMSTART, 0, 0);
  }
+diff --git a/Internet/SNMP/snmp_custom.h b/Internet/SNMP/snmp_custom.h
+index c4afa30..02eda76 100644
+--- a/Internet/SNMP/snmp_custom.h
++++ b/Internet/SNMP/snmp_custom.h
+@@ -24,6 +24,16 @@ extern const int32_t maxData;
+ /* Predefined function: Response value control */
+ void initTable();
+ 
++/* Sync g_devices[] values into the SNMP table. Call before each snmpd_run(). */
++void snmp_custom_refresh(void);
++
++/* Send a v2c trap carrying one device value cell.
++   dev and col are 0-based; managerIP/agentIP are 4-byte IPv4 arrays.
++   Must be called from the SNMP agent task — it reuses the trap socket. */
++void snmp_custom_sendValueTrap(const uint8_t *managerIP,
++                               const uint8_t *agentIP,
++                               uint8_t dev, uint8_t col);
++
+ /* User defined functions: LED control examples */
+ #ifdef _USE_WIZNET_W5500_EVB_
+ 	void get_LEDStatus_all(void *ptr, uint8_t *len);
