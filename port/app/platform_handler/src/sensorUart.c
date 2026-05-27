@@ -6,6 +6,7 @@
 #include "pico/stdlib.h"
 #include "hardware/uart.h"
 #include "hardware/irq.h"
+#include "hardware/gpio.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -14,27 +15,33 @@
 #include "sensorUart.h"
 #include "sensor.h"
 #include "snmpHandler.h"      /* snmp_notify_device */
+#include "ConfigData.h"       /* get_DevConfig_pointer, struct __serial_option */
 #include "uartHandler.h"      /* UART_ID, platform_uart_puts, DATA0_UART_Configuration */
 #include "bufferHandler.h"    /* data buffer ring */
+#include "WIZnet_board.h"     /* RS485_UART_TX_PIN, RS485_UART_RX_PIN, RS485_UART_DE_PIN */
 #include "WIZ5XXSR-RP_Debug.h"
 
 #define UART_LINE_BUF_SIZE  64
 
+/* baud_table is defined (non-static) in uartHandler.c */
+extern uint32_t baud_table[];
+
 static SemaphoreHandle_t s_uart_sem = NULL;
 
-/*  ===== RX ISR ============================================================
-    Replaces uartHandler.c's on_uart_rx which is wired for SEG/AT gateway
-    mode. We just stash bytes into the existing data_buffer ring and signal
-    the parsing task.
+volatile uint32_t dbg_rs232_isr_cnt = 0;
+volatile uint32_t dbg_rs485_isr_cnt = 0;
+
+/*  ===== RS-232 RX ISR (uart1, GPIO4/5) ====================================
+    Handles incoming bytes from the RS-232 transceiver (XR32330).
     ========================================================================= */
-static void sensorUart_rx_isr(void) {
+static void sensorUart_rs232_rx_isr(void) {
+    dbg_rs232_isr_cnt++;
     BaseType_t higher = pdFALSE;
     while (uart_is_readable(UART_ID)) {
         uint8_t ch = uart_getc(UART_ID);
         if (!is_data_buffer_full()) {
             put_byte_to_data_buffer(ch);
         }
-        /* If buffer is full we drop the byte. */
     }
     if (s_uart_sem != NULL) {
         xSemaphoreGiveFromISR(s_uart_sem, &higher);
@@ -42,25 +49,113 @@ static void sensorUart_rx_isr(void) {
     }
 }
 
+/*  ===== RS-485 RX ISR (uart0, GPIO0/1) ====================================
+    Handles incoming bytes from the RS-485 transceiver (SP3485EN).
+    DE pin (GPIO3) is held LOW so the receiver is always enabled.
+    ========================================================================= */
+static void sensorUart_rs485_rx_isr(void) {
+    dbg_rs485_isr_cnt++;
+    gpio_xor_mask(1u << 19);   /* LED3 toggle: visual proof ISR is firing */
+    BaseType_t higher = pdFALSE;
+    while (uart_is_readable(uart0)) {
+        uint8_t ch = uart_getc(uart0);
+        if (!is_data_buffer_full()) {
+            put_byte_to_data_buffer(ch);
+        }
+    }
+    if (s_uart_sem != NULL) {
+        xSemaphoreGiveFromISR(s_uart_sem, &higher);
+        portYIELD_FROM_ISR(higher);
+    }
+}
+
+/*  ===== RS-485 UART (uart0) initialisation =================================
+    Reads baud/parity/data-bits from DevConfig so both ports match.
+    ========================================================================= */
+static void init_rs485_uart(void) {
+    struct __serial_option *opt =
+        (struct __serial_option *) & (get_DevConfig_pointer()->serial_option);
+
+    uart_init(uart0, 115200);
+
+    gpio_set_function(RS485_UART_TX_PIN, GPIO_FUNC_UART);
+    gpio_set_function(RS485_UART_RX_PIN, GPIO_FUNC_UART);
+    gpio_pull_up(RS485_UART_RX_PIN);
+
+    /* Baud rate */
+    uint32_t baud = 115200;
+    if (opt->baud_rate < 20) {
+        baud = baud_table[opt->baud_rate];
+    }
+    uart_set_baudrate(uart0, baud);
+
+    /* Data bits */
+    uint8_t dbits = (opt->data_bits == word_len7) ? 7 : 8;
+
+    /* Stop bits */
+    uint8_t sbits = (opt->stop_bits == stop_bit2) ? 2 : 1;
+
+    /* Parity */
+    uart_parity_t par = UART_PARITY_NONE;
+    if (opt->parity == parity_odd) {
+        par = UART_PARITY_ODD;
+    }
+    if (opt->parity == parity_even) {
+        par = UART_PARITY_EVEN;
+    }
+
+    uart_set_format(uart0, dbits, sbits, par);
+    uart_set_hw_flow(uart0, false, false);
+    uart_set_fifo_enabled(uart0, true);
+
+    /* DE / nRE pin — GPIO output, LOW = receiver enabled */
+    gpio_init(RS485_UART_DE_PIN);
+    gpio_set_dir(RS485_UART_DE_PIN, GPIO_OUT);
+    gpio_put(RS485_UART_DE_PIN, 0);
+
+    irq_set_exclusive_handler(UART0_IRQ, sensorUart_rs485_rx_isr);
+    irq_set_enabled(UART0_IRQ, true);
+    uart_set_irq_enables(uart0, true, false);   /* RX irq only */
+
+    PRT_INFO("sensorUart: RS-485 ready (uart0, TX=GPIO%d, RX=GPIO%d, DE=GPIO%d)\r\n",
+             RS485_UART_TX_PIN, RS485_UART_RX_PIN, RS485_UART_DE_PIN);
+}
+
 void sensorUart_init(void) {
     s_uart_sem = xSemaphoreCreateBinary();
 
-    /* HW setup (baud/parity/pins) from DevConfig.serial_option */
-    DATA0_UART_Configuration();
+    /* ── RS-232 (uart1, GPIO4/5) ── */
+    DATA0_UART_Configuration();   /* baud/parity/pins from DevConfig.serial_option */
 
-    /* Override the IRQ handler with ours — replaces uartHandler's on_uart_rx */
-    int uart_irq = (UART_ID == uart0) ? UART0_IRQ : UART1_IRQ;
-    irq_set_exclusive_handler(uart_irq, sensorUart_rx_isr);
-    irq_set_enabled(uart_irq, true);
-    uart_set_irq_enables(UART_ID, true, false);   /* RX irq only */
+    irq_set_exclusive_handler(UART1_IRQ, sensorUart_rs232_rx_isr);
+    irq_set_enabled(UART1_IRQ, true);
+    uart_set_irq_enables(UART_ID, true, false);
 
-    PRT_INFO("sensorUart: RX ready (UART_ID=uart%d)\r\n",
-             (UART_ID == uart0) ? 0 : 1);
+    PRT_INFO("sensorUart: RS-232 ready (uart1, TX=GPIO%d, RX=GPIO%d)\r\n",
+             DATA0_UART_TX_PIN, DATA0_UART_RX_PIN);
+
+    /* ── RS-485 (uart0, GPIO0/1, DE=GPIO3) ── */
+    init_rs485_uart();
 }
 
-/* Send a NUL-terminated string out the data UART. */
+/*  ===== TX helpers =========================================================
+    Replies (R command) are sent on BOTH ports so either connected device
+    receives the response regardless of which port sent the command.
+    ========================================================================= */
+static void rs485_tx_str(const char *s) {
+    gpio_put(RS485_UART_DE_PIN, 1);   /* DE HIGH: enable driver */
+    const char *p = s;
+    while (*p) {
+        uart_putc_raw(uart0, (uint8_t)*p++);
+    }
+    uart_tx_wait_blocking(uart0);
+    gpio_put(RS485_UART_DE_PIN, 0);   /* DE LOW: back to receive */
+}
+
+/* Send on RS-232 (uart1) and RS-485 (uart0) simultaneously. */
 static void uart_tx_str(const char *s) {
-    platform_uart_puts((uint8_t *)s, (uint16_t)strlen(s));
+    platform_uart_puts((uint8_t *)s, (uint16_t)strlen(s));   /* RS-232 */
+    rs485_tx_str(s);                                           /* RS-485 */
 }
 
 /*  ===== Write handler  (S / T commands) =================================
@@ -221,32 +316,38 @@ static void parse_line(const char *line) {
 }
 
 /*  ===== Parsing task =====================================================
-    Wakes on RX semaphore, drains the byte ring buffer, assembles lines
-    terminated by '\n' (or '\r\n'), parses each line.
+    Wakes on RX semaphore (from either RS-232 or RS-485 ISR), drains the
+    byte ring buffer, assembles lines terminated by '\n' (or '\r\n'),
+    parses each line.
     ========================================================================= */
 void sensorUart_task(void *argument) {
     (void)argument;
 
     static char line[UART_LINE_BUF_SIZE];
     uint16_t pos = 0;
+    TickType_t last_dbg = 0;
 
     while (1) {
-        xSemaphoreTake(s_uart_sem, portMAX_DELAY);
+        xSemaphoreTake(s_uart_sem, pdMS_TO_TICKS(5000));
+
+        TickType_t now = xTaskGetTickCount();
+        if ((now - last_dbg) >= pdMS_TO_TICKS(5000)) {
+            printf("[UART] RS232 ISR=%lu  RS485 ISR=%lu\r\n",
+                   dbg_rs232_isr_cnt, dbg_rs485_isr_cnt);
+            last_dbg = now;
+        }
 
         while (!is_data_buffer_empty()) {
             int32_t ch = data_buffer_getc_nonblk();
             if (ch == RET_NOK) {
                 break;
             }
-            if (ch == '\r') {
-                continue;       /* swallow CR */
-            }
-            if (ch == '\n') {
-                line[pos] = '\0';
+            if (ch == '\r' || ch == '\n') {
                 if (pos > 0) {
+                    line[pos] = '\0';
                     parse_line(line);
+                    pos = 0;
                 }
-                pos = 0;
                 continue;
             }
             if (pos < UART_LINE_BUF_SIZE - 1) {

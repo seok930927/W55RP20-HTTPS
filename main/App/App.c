@@ -18,6 +18,7 @@
 #include "WIZnet_board.h"
 #include "port_common.h"
 #include "ConfigData.h"
+#include "uartHandler.h"
 #include "timerHandler.h"
 #include "deviceHandler.h"
 #include "flashHandler.h"
@@ -111,6 +112,7 @@ void heap_monitor_task(void *argument);
     ----------------------------------------------------------------------------------------------------
 */
 int main() {
+    stdio_init_all();
     xTaskCreate(start_task, "Start_Task", START_TASK_STACK_SIZE, NULL, START_TASK_PRIORITY, NULL);
     vTaskStartScheduler();
 
@@ -169,6 +171,8 @@ static void set_minimal_runtime_config(void) {
 
     dev_config->network_connection.working_mode = TCP_SERVER_MODE;
     dev_config->network_connection.dns_use = DISABLE;
+    dev_config->serial_option.uart_interface = UART_IF_RS232_TTL;
+    dev_config->serial_option.flow_control   = flow_none;
 }
 
 void heap_monitor_task(void *argument) {
@@ -194,8 +198,8 @@ void start_task(void *argument) {
     printf("Current System Clock: %lu Hz (%lu MHz)\n", current_hz, current_hz / 1000000);
 
     load_DevConfig_from_storage();
-    set_minimal_runtime_config();
     RP2040_Board_Init();
+    set_minimal_runtime_config();
 
     Net_Conf();
     display_Dev_Info_main();

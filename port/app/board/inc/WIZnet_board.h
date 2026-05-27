@@ -104,11 +104,16 @@ typedef enum {RESET = 0, SET = !RESET} FlagStatus, ITStatus;
 #define STATUS_TCPCONNECT_PIN   11
 #endif
 
-// UART1
+// RS-232 (XR32330) — RP2040 uart1, schematic "UART0"
 #define DATA0_UART_TX_PIN      4
 #define DATA0_UART_RX_PIN      5
 #define DATA0_UART_CTS_PIN     6
 #define DATA0_UART_RTS_PIN     7
+
+// RS-485 (SP3485EN) — RP2040 uart0, schematic "UART1"
+#define RS485_UART_TX_PIN      0
+#define RS485_UART_RX_PIN      1
+#define RS485_UART_DE_PIN      3    // DE / nRE: HIGH = transmit, LOW = receive
 
 // SPI0
 #define DATA0_SPI_SCK_PIN      2
