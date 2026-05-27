@@ -452,3 +452,48 @@ char atonum(char ch) {
     return (ch);
 }
 
+void check_mac_address(void) {
+    DevConfig *dev_config = get_DevConfig_pointer();
+    uint8_t buf[12], vt, temp;
+    uint32_t vi, vj;
+    uint8_t temp_buf[] = "INPUT MAC ? ";
+
+    if (dev_config->network_common.mac[0] != MAC_OUI0 ||
+            dev_config->network_common.mac[1] != MAC_OUI1 ||
+            dev_config->network_common.mac[2] != MAC_OUI2) {
+
+        PRT_INFO("%s\r\n", temp_buf);
+        platform_uart_puts(temp_buf, strlen(temp_buf));
+
+        while (1) {
+            vt = uart_getc(UART_ID);
+            if (vt == 'S') {
+                temp = 'R';
+                platform_uart_puts(&temp, 1);
+                break;
+            }
+        }
+        for (vi = 0; vi < 12; vi++) {
+            buf[vi] = uart_getc(UART_ID);
+        }
+        platform_uart_puts(buf, 12);
+        platform_uart_puts("\r\n", 2);
+
+        for (vi = 0, vj = 0; vi < 6; vi++, vj += 2) {
+            dev_config->network_common.mac[vi] = get_hex(buf[vj], buf[vj + 1]);
+            mac[vi] = get_hex(buf[vj], buf[vj + 1]);
+        }
+
+        erase_flash_sector(FLASH_MAC_ADDR);
+        write_flash(FLASH_MAC_ADDR, mac, 6);
+
+        sprintf((char *)dev_config->device_option.device_alias,
+                "%s-%02X%02X%02X%02X%02X%02X",
+                dev_config->device_common.device_name,
+                mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+        save_DevConfig_to_storage();
+        device_raw_reboot();
+    }
+}
+

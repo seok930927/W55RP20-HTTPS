@@ -239,5 +239,6 @@ void set_dhcp_mode(void);
 
 uint8_t get_hex(uint8_t b0, uint8_t b1);
 char atonum(char ch);
+void check_mac_address(void);
 
 #endif /* __CONFIGDATA_H__ */

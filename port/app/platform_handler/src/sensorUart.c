@@ -31,8 +31,24 @@ static SemaphoreHandle_t s_uart_sem = NULL;
 volatile uint32_t dbg_rs232_isr_cnt = 0;
 volatile uint32_t dbg_rs485_isr_cnt = 0;
 
-/*  ===== RS-232 RX ISR (uart1, GPIO4/5) ====================================
-    Handles incoming bytes from the RS-232 transceiver (XR32330).
+/*  ===== [U4] RX ISR pair — byte ingestion ==================================
+    USER-CUSTOMIZABLE: Change how incoming bytes are stored or routed.
+
+    Current policy: both ISRs push bytes into the SAME shared ring buffer.
+    The task cannot tell which port a byte came from.
+
+    To track the originating port:
+      Option A — add a volatile flag:
+          static volatile uint8_t s_last_rx_port = 0;   // 0=232, 1=485
+          Set it in each ISR before giving the semaphore.
+          Read it in sensorUart_task() / parse_request() to decide reply port.
+
+      Option B — separate ring buffers per port (more complex, avoids races
+          between simultaneous traffic on both ports).
+
+    DRIVER LAYER (do not change unless HW changes):
+      RS-232  XR32330  uart1  GPIO4(TX) GPIO5(RX)              UART1_IRQ
+      RS-485  SP3485EN uart0  GPIO0(TX) GPIO1(RX) GPIO3(DE)    UART0_IRQ
     ========================================================================= */
 static void sensorUart_rs232_rx_isr(void) {
     dbg_rs232_isr_cnt++;
@@ -138,9 +154,17 @@ void sensorUart_init(void) {
     init_rs485_uart();
 }
 
-/*  ===== TX helpers =========================================================
-    Replies (R command) are sent on BOTH ports so either connected device
-    receives the response regardless of which port sent the command.
+/*  ===== [U3] TX helpers — reply routing =====================================
+    USER-CUSTOMIZABLE: Change which port(s) a reply is sent on.
+
+    Current policy: ALL replies go to BOTH RS-232 and RS-485 simultaneously,
+    regardless of which port sent the command.
+
+    rs485_tx_str()  — RS-485 only (DE pin managed internally)
+    uart_tx_str()   — BOTH ports (calls platform_uart_puts + rs485_tx_str)
+
+    To change: replace uart_tx_str() calls in parse_request() with individual
+    port functions. See [U2] for how to track the originating port.
     ========================================================================= */
 static void rs485_tx_str(const char *s) {
     gpio_put(RS485_UART_DE_PIN, 1);   /* DE HIGH: enable driver */
@@ -158,7 +182,9 @@ static void uart_tx_str(const char *s) {
     rs485_tx_str(s);                                           /* RS-485 */
 }
 
-/*  ===== Write handler  (S / T commands) =================================
+/*  ===== [U1] Write handler  (S / T commands) ================================
+    USER-CUSTOMIZABLE: This function decides what happens when S or T arrives.
+
     Two-level value list:
         ','  → next value column within the current device
         ';'  → next device (column resets to 0)
@@ -168,6 +194,8 @@ static void uart_tx_str(const char *s) {
         S1=12,23,1            device 1 = {12,23,1}
         S1=12,23,1;13,24,0    device 1 = {12,23,1}, device 2 = {13,24,0}
     send_trap != 0 (T command) → queue one SNMP trap per device touched.
+
+    To add: value range check, logging, duplicate-suppression, etc.
     ========================================================================= */
 static void parse_write(const char *p, int dev, uint8_t send_trap) {
     uint8_t col         = 0;
@@ -214,11 +242,19 @@ static void parse_write(const char *p, int dev, uint8_t send_trap) {
     }
 }
 
-/*  ===== Request handler  (R command) ====================================
+/*  ===== [U2] Request handler  (R command) ===================================
+    USER-CUSTOMIZABLE: This function decides what to reply and where to send it.
+
     "R<dev>"          → reply one line with the device's value columns
     "R<d1>~<d2>"      → reply one line per device in range
     Reply format:  R<dev>=<v0>,<v1>,...\r\n
     Out-of-range devices are skipped.
+
+    Currently: uart_tx_str() sends reply on BOTH RS-232 and RS-485.
+    To reply only on the originating port, replace uart_tx_str() with:
+        platform_uart_puts(...)  — RS-232 only
+        rs485_tx_str(...)        — RS-485 only
+    (You'll need to track which port triggered the semaphore — see [U4].)
     ========================================================================= */
 static void parse_request(const char *p) {
     while (*p == ' ' || *p == '\t') {
@@ -274,18 +310,16 @@ static void parse_request(const char *p) {
     }
 }
 
-/*  ===== Line parser ======================================================
+/*  ===== Line parser — command dispatch ====================================
+    Assembles one complete line then dispatches to [U1] or [U2].
+    Add new commands here (new else-if branch on cmd letter).
+
     Commands (leading whitespace tolerated, case-insensitive):
-      S<dev>=<vals>            write values; ',' = column, ';' = next device
-      T<dev>=<vals>            same as S, plus an SNMP trap per device
-      R<dev>                   request one device  → reply on UART TX
-      R<d1>~<d2>               request a device range → reply on UART TX
-    Examples (DEVICE_VALUE_COLS = 3):
-      "S0=235,600,0"          → device 0 = {235, 600, 0}
-      "S0=235,600,0;236,601,1"→ device 0 + device 1
-      "T5=10,20,1"            → device 5 = {10, 20, 1}  + trap
-      "R5"                    → "R5=235,600,0\r\n"
-      "R5~9"                  → one "R<d>=...\r\n" line per device 5..9
+      S<dev>=<vals>            write values → [U1] parse_write(send_trap=0)
+      T<dev>=<vals>            write + SNMP trap → [U1] parse_write(send_trap=1)
+      R<dev>                   request one device → [U2] parse_request()
+      R<d1>~<d2>               request a range   → [U2] parse_request()
+    Unrecognised commands: logged via PRT_INFO, otherwise ignored.
     ========================================================================= */
 static void parse_line(const char *line) {
     while (*line == ' ' || *line == '\t') {

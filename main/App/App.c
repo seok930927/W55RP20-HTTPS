@@ -200,6 +200,8 @@ void start_task(void *argument) {
     load_DevConfig_from_storage();
     RP2040_Board_Init();
     set_minimal_runtime_config();
+    DATA0_UART_Configuration();   /* UART must be ready before check_mac_address() */
+    check_mac_address();
 
     Net_Conf();
     display_Dev_Info_main();
