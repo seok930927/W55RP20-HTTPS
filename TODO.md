@@ -124,28 +124,20 @@ UART S/T 명령으로 입력된 디바이스 값이 재부팅 후에도 유지�
 
 ## 5. USB CDC 디버그 포트 활성화
 
-**상태**: 미착수
+**상태**: 수정 완료 (2026-05-27)
 
-### 요구사항
-현재 USB CDC(가상 COM 포트)가 장치 관리자에서 "알 수 없는 장치(Code 10)"로 잡혀
-`printf` 디버그 출력을 PC에서 볼 수 없음.
+### 근본 원인 (확인됨)
+`configSUPPORT_PICO_TIME_INTEROP 1` 설정으로 인해 `add_alarm_in_ms()`가
+FreeRTOS 소프트웨어 타이머로 변환된다. FreeRTOS 타이머는 `vTaskStartScheduler()`
+이후에만 동작하는데, `stdio_init_all()`을 `main()`(스케줄러 시작 전)에서
+호출했기 때문에 USB polling alarm이 등록되지 않아 `tud_task()`가 절대
+호출되지 않았음 → Windows Code 10.
 
-### 현재 증상
-- Windows 장치 관리자: 알 수 없는 장치 / Code 10
-- USB CDC 드라이버 인식 실패
-- `stdio_init_all()` 은 호출되지만 출력 안 됨
+베어메탈 FW는 스케줄러 없이 하드웨어 타이머를 직접 사용하므로 정상 동작.
 
-### 원인 후보
-1. `tusb_config.h` 설정 미스 — CFG_TUD_CDC 버퍼 크기, endpoint 설정
-2. `tud_init()` / `tud_task()` 미호출 또는 FreeRTOS 태스크에서 호출 누락
-3. USB descriptor가 호스트 OS와 맞지 않음
-4. RP2040 USB 클럭 설정 문제 (시스템 클럭 200MHz 에서 USB 48MHz 파생 확인 필요)
-
-### 작업 범위
-- `tusb_config.h` — descriptor / 버퍼 설정 점검
-- `App.c` — `tud_task()` 호출 위치 / 태스크 확인
-- USB 클럭 설정 확인 (`clock_configure` or `set_sys_clock_khz`)
-- Windows에서 CDC 드라이버 수동 설치 시도 후 결과 확인
+### 해결
+`App.c` — `stdio_init_all()`을 `main()`에서 `start_task()` 맨 앞으로 이동.
+스케줄러 시작 후 USB 초기화 → alarm이 FreeRTOS 타이머 데몬에 정상 등록됨.
 
 ---
 

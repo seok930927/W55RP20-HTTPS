@@ -9,7 +9,6 @@
     Includes
     ----------------------------------------------------------------------------------------------------
 */
-#include "tusb.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -112,7 +111,6 @@ void heap_monitor_task(void *argument);
     ----------------------------------------------------------------------------------------------------
 */
 int main() {
-    stdio_init_all();
     xTaskCreate(start_task, "Start_Task", START_TASK_STACK_SIZE, NULL, START_TASK_PRIORITY, NULL);
     vTaskStartScheduler();
 
@@ -187,6 +185,12 @@ void heap_monitor_task(void *argument) {
 
 void start_task(void *argument) {
     (void)argument;
+
+    /*  stdio_init_all() must be called here (inside FreeRTOS task), NOT in main().
+        configSUPPORT_PICO_TIME_INTEROP redirects add_alarm_in_ms() to FreeRTOS
+        timers, which only work after vTaskStartScheduler(). Calling it before the
+        scheduler means the USB polling alarm never fires → Code 10 on Windows. */
+    stdio_init_all();
 
     RP2040_Init();
     RP2040_W5X00_Init();
