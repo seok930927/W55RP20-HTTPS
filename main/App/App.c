@@ -186,10 +186,16 @@ void heap_monitor_task(void *argument) {
 void start_task(void *argument) {
     (void)argument;
 
-    /*  stdio_init_all() must be called here (inside FreeRTOS task), NOT in main().
-        configSUPPORT_PICO_TIME_INTEROP redirects add_alarm_in_ms() to FreeRTOS
-        timers, which only work after vTaskStartScheduler(). Calling it before the
-        scheduler means the USB polling alarm never fires → Code 10 on Windows. */
+    /*  Pin this task to Core 0. stdio_init_all() -> stdio_usb_init() asserts that
+        it runs on the default alarm pool core (Core 0); under FreeRTOS SMP this
+        task could otherwise be scheduled on Core 1 and trip that assert. Pinning
+        also keeps USBCTRL_IRQ and its mutex-coordinated tud_task() worker on Core 0. */
+    vTaskCoreAffinitySet(NULL, 1U << 0);
+
+    /*  stdio_init_all() here (after the scheduler is running), not in main().
+        pico_stdio_usb services tud_task() from its own IRQ worker, serialized with
+        printf output via an internal mutex — do NOT add a separate tud_task() task,
+        that races the worker and stalls output. */
     stdio_init_all();
 
     RP2040_Init();
