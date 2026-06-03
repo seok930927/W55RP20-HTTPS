@@ -291,4 +291,57 @@ static const uint8_t CREATION_PASS_HASH[HTTPS_HASH_LEN] = { 0x12,0x1d,... };
 
 ---
 
-<!-- 새 작업은 아래에 ## 11, ## 12 ... 형식으로 추가 -->
+## 11. 웹페이지에서 시리얼 포트 설정 (통신속도/포맷)
+
+**상태**: 미착수
+
+### 요구사항
+현재 시리얼 통신 파라미터가 사실상 고정(부팅 시 강제 설정)되어 있음.
+이를 HTTPS 웹페이지 설정화면에서 변경 가능하게.
+
+설정 항목 (Config tool 화면 기준):
+| 항목 | DevConfig 필드 | 값 |
+|---|---|---|
+| Baud | `serial_option.baud_rate` | enum (300 ~ 921600 ~ 8M) |
+| Data size | `serial_option.data_bits` | 7 / 8 / 9 |
+| Parity | `serial_option.parity` | None / Odd / Even |
+| Handshake | `serial_option.flow_control` | OFF(None) / RTS·CTS / XON·XOFF |
+| Mode | `serial_option.protocol` | Free(None) / Modbus RTU / Modbus ASCII |
+
+(struct에는 `stop_bits`도 있음 — 필요 시 항목 추가 가능)
+
+### 현재 동작
+- `struct __serial_option` (`ConfigData.h:93`) — 필드 **이미 존재 + 플래시 저장됨**.
+  → 새 플래시 필드 추가 불필요, **웹 UI + 적용 로직만** 필요.
+- `DATA0_UART_Configuration()` (RS-232/uart1) 와 `init_rs485_uart()`
+  (RS-485/uart0) 가 **둘 다 같은 `serial_option`을 읽음** → 한 설정이 양 포트에 적용.
+- enum 정의: `uartHandler.h` (baud / word_len / parity / stop_bit / flow_ctrl / protocol).
+- **걸림돌**: `App.c`의 `set_minimal_runtime_config()`가 부팅마다
+  ```
+  serial_option.uart_interface = UART_IF_RS232_TTL;
+  serial_option.flow_control   = flow_none;
+  ```
+  로 **강제 덮어씀** → 웹에서 바꿔도 재부팅 시 초기화됨. 이 강제 설정을 제거/조정해야 함.
+
+### 변경 방향
+1. `set_minimal_runtime_config()`의 시리얼 강제 설정 제거(또는 최초 1회만)
+   → 저장된 `serial_option` 값이 살아남도록
+2. 웹 설정화면에 5개 입력(드롭다운) 추가, 현재 값 표시
+3. `/api/...` 저장 처리 → `serial_option` 갱신 → 플래시 저장
+4. 적용: 저장 후 `DATA0_UART_Configuration()` + `init_rs485_uart()` 재호출
+   또는 재부팅 (적용 시점 정의)
+5. baud/data/parity/flow/protocol 값 유효성 검사 (enum 범위)
+
+### 작업 범위
+- `App.c` — `set_minimal_runtime_config()` 시리얼 강제 설정 제거
+- `httpHandler.c` — 시리얼 설정 JSON 항목 + 저장 엔드포인트
+- `Web_page.html` / `Web_page.h` — 드롭다운 5종 추가, 재생성
+- (선택) 저장 즉시 적용 시 UART 재초기화 경로
+
+### 관련
+- 클러스터 B(#2/#7/#8)와 동일 패턴(DevConfig + config JSON + Web_page 폼 + 재생성)
+  → 함께 작업하면 `Web_page.h` 재생성·config JSON 편집 반복 최소화.
+
+---
+
+<!-- 새 작업은 아래에 ## 12, ## 13 ... 형식으로 추가 -->
