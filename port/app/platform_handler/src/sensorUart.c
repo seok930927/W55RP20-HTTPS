@@ -141,17 +141,22 @@ static void init_rs485_uart(void) {
 void sensorUart_init(void) {
     s_uart_sem = xSemaphoreCreateBinary();
 
-    /* ── RS-232 (uart1, GPIO4/5) ── */
-    DATA0_UART_Configuration();   /* baud/parity/pins from DevConfig.serial_option */
+    /*  ── RS-232 (uart1, GPIO4/5) ──
+        Skip the S/T/R handler when RS-232 is in Modbus mode: modbusMaster owns
+        uart1 and polls it synchronously (no shared RX ISR / ring buffer).
+        Only takes uart1 for S/T/R in Free mode. */
+    if (get_DevConfig_pointer()->serial_option.protocol == modbus_rtu) {
+        PRT_INFO("sensorUart: RS-232 in Modbus mode -> handed to modbusMaster\r\n");
+    } else {
+        DATA0_UART_Configuration();   /* baud/parity/pins from DevConfig.serial_option */
+        irq_set_exclusive_handler(UART1_IRQ, sensorUart_rs232_rx_isr);
+        irq_set_enabled(UART1_IRQ, true);
+        uart_set_irq_enables(UART_ID, true, false);
+        PRT_INFO("sensorUart: RS-232 ready (uart1, TX=GPIO%d, RX=GPIO%d)\r\n",
+                 DATA0_UART_TX_PIN, DATA0_UART_RX_PIN);
+    }
 
-    irq_set_exclusive_handler(UART1_IRQ, sensorUart_rs232_rx_isr);
-    irq_set_enabled(UART1_IRQ, true);
-    uart_set_irq_enables(UART_ID, true, false);
-
-    PRT_INFO("sensorUart: RS-232 ready (uart1, TX=GPIO%d, RX=GPIO%d)\r\n",
-             DATA0_UART_TX_PIN, DATA0_UART_RX_PIN);
-
-    /* ── RS-485 (uart0, GPIO0/1, DE=GPIO3) ── */
+    /* ── RS-485 (uart0, GPIO0/1, DE=GPIO3) — always S/T/R ── */
     init_rs485_uart();
 }
 
@@ -377,6 +382,10 @@ void sensorUart_task(void *argument) {
             if (ch == RET_NOK) {
                 break;
             }
+            /*  DIAG: dump every received byte as hex + char. If baud is right,
+                sending "R0\r" shows: RX 52 'R'  RX 30 '0'  RX 0D '.' */
+            printf("RX %02X '%c'\r\n", (unsigned)(ch & 0xFF),
+                   (ch >= 0x20 && ch < 0x7f) ? (char)ch : '.');
             if (ch == '\r' || ch == '\n') {
                 if (pos > 0) {
                     line[pos] = '\0';

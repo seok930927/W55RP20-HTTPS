@@ -201,6 +201,7 @@ target_sources(APP_PLATFORM_FILES PUBLIC
         ${APP_PORT_DIR}/platform_handler/src/snmpBuffer.c
         ${APP_PORT_DIR}/platform_handler/src/sensor.c
         ${APP_PORT_DIR}/platform_handler/src/sensorUart.c
+        ${APP_PORT_DIR}/platform_handler/src/modbusMaster.c
         ${APP_PORT_DIR}/platform_handler/src/spiHandler.c
         ${APP_PORT_DIR}/platform_handler/src/storageHandler.c
         ${APP_PORT_DIR}/platform_handler/src/timerHandler.c

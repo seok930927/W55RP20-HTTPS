@@ -28,6 +28,7 @@
 #include "segcp.h"
 #include "sensor.h"
 #include "sensorUart.h"
+#include "modbusMaster.h"
 
 #include "w5x00_spi.h"
 
@@ -55,6 +56,9 @@
 
 #define SENSOR_UART_TASK_STACK_SIZE 1024
 #define SENSOR_UART_TASK_PRIORITY 9
+
+#define MODBUS_MASTER_TASK_STACK_SIZE 1024
+#define MODBUS_MASTER_TASK_PRIORITY 9
 
 #define HEAP_MONITOR_TASK_STACK_SIZE 1024
 #define HEAP_MONITOR_TASK_PRIORITY 6
@@ -222,17 +226,36 @@ void start_task(void *argument) {
     set_W5X00_NetTimeout();
     Timer_Configuration();
 
-    /* ── Device bank: demo entries (TEST) ─────────────────────────────── */
-    // TEST용 디바이스 초기화. 실제 제품에서는 UART(S/T 명령)로 값이 들어옴.
+    /* ── Device bank ──────────────────────────────────────────────────── */
     device_init();
 
-    for (uint8_t d = 0; d < DEVICE_COUNT; d++) {
-        char name[DEVICE_NAME_MAX];
-        snprintf(name, sizeof(name), "Device %d", d + 1);
-        device_assign(d, name);
-        device_setValue(d, 0, 235 + d);   /* col 0 — temperature  23.5C~ */
-        device_setValue(d, 1, 600 + d);   /* col 1 — humidity     60.0%~ */
-        device_setValue(d, 2, d & 1);     /* col 2 — alarm        0 / 1   */
+    uint8_t modbus_mode = (get_DevConfig_pointer()->serial_option.protocol == modbus_rtu);  /* RS-232 (uart1) */
+    printf("=== RS-232 protocol=%d  modbus_mode=%d (1=Modbus poller ON) ===\r\n",
+           get_DevConfig_pointer()->serial_option.protocol, modbus_mode);
+
+    /*  Demo entries matching the reference capture (온습도센서화면전송.pptx).
+        Set unconditionally (both modes) as initial values:
+          slave 1: temp 0x00FA=250 (25.0C), hum 0x0208=520 (52.0%)
+          slave 2: temp 0x010F=271 (27.1C), hum 0x01FC=508 (50.8%)
+          slave 3: temp 0x0116=278 (27.8C), hum 0x01F6=502 (50.2%)
+          slave 4: temp 0x0114=276 (27.6C), hum 0x0200=512 (51.2%)
+        In Modbus mode these are overwritten by modbusMaster_task once real
+        responses arrive (and remain visible for any slave that never replies). */
+    {
+        static const struct {
+            int16_t temp;
+            int16_t hum;
+        } demo[4] = {
+            { 250, 520 }, { 271, 508 }, { 278, 502 }, { 276, 512 },
+        };
+        for (uint8_t d = 0; d < 4; d++) {
+            char name[DEVICE_NAME_MAX];
+            snprintf(name, sizeof(name), "TH-%d", d + 1);
+            device_assign(d, name);
+            device_setValue(d, 0, demo[d].temp);   /* col 0 — temperature */
+            device_setValue(d, 1, demo[d].hum);    /* col 1 — humidity    */
+            device_setValue(d, 2, 0);              /* col 2 — alarm       */
+        }
     }
 
     /* ── UART RX → sensor bank ingestion ─────────────────────────────── */
@@ -254,6 +277,9 @@ void start_task(void *argument) {
     xTaskCreate(segcp_udp_task, "SEGCP_udp_Task", SEGCP_UDP_TASK_STACK_SIZE, NULL, SEGCP_UDP_TASK_PRIORITY, NULL);
     xTaskCreate(segcp_tcp_task, "SEGCP_tcp_Task", SEGCP_TCP_TASK_STACK_SIZE, NULL, SEGCP_TCP_TASK_PRIORITY, NULL);
     xTaskCreate(sensorUart_task, "Sensor_UART_Task", SENSOR_UART_TASK_STACK_SIZE, NULL, SENSOR_UART_TASK_PRIORITY, NULL);
+    if (modbus_mode) {
+        xTaskCreate(modbusMaster_task, "Modbus_Master_Task", MODBUS_MASTER_TASK_STACK_SIZE, NULL, MODBUS_MASTER_TASK_PRIORITY, NULL);
+    }
     // xTaskCreate(heap_monitor_task, "Heap_Monitor_Task", HEAP_MONITOR_TASK_STACK_SIZE, NULL, HEAP_MONITOR_TASK_PRIORITY, NULL);
 #ifdef __USE_WATCHDOG__
     watchdog_enable(8388, 0);
