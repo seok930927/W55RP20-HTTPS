@@ -17,7 +17,11 @@
 #include "snmpHandler.h"
 
 #define HTTPS_SERVER_PORT   443
-#define HTTPS_RX_BUF_SIZE   1024
+/*  RX buffer must hold a full request line + headers + body in one mbedtls_ssl_read.
+    The /api/config POST body grew large (network + SNMP×8 + web×2 + ports + session +
+    serial×10 ≈ 600B) and with browser headers (User-Agent/Cookie/Accept…) the whole
+    request reaches ~1.2KB — 1024 truncated it and broke save. 2048 gives headroom. */
+#define HTTPS_RX_BUF_SIZE   2048
 #define HTTPS_TX_CHUNK_SIZE 512
 #define HTTPS_HDR_BUF_SIZE  512
 
@@ -393,21 +397,66 @@ static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
 
 static int https_send_config_json(wiz_tls_context *tls_ctx) {
     DevConfig *conf = get_DevConfig_pointer();
-    char body[192];
+    char body[768];
     char header[128];
-    int n = snprintf(body, sizeof(body),
-                     "{\"allowed_ip0\":\"%u.%u.%u.%u\","
-                     "\"allowed_ip1\":\"%u.%u.%u.%u\","
-                     "\"trap_ip0\":\"%u.%u.%u.%u\","
-                     "\"trap_ip1\":\"%u.%u.%u.%u\"}",
-                     conf->snmp_option.allowed_ip[0][0], conf->snmp_option.allowed_ip[0][1],
-                     conf->snmp_option.allowed_ip[0][2], conf->snmp_option.allowed_ip[0][3],
-                     conf->snmp_option.allowed_ip[1][0], conf->snmp_option.allowed_ip[1][1],
-                     conf->snmp_option.allowed_ip[1][2], conf->snmp_option.allowed_ip[1][3],
-                     conf->snmp_option.trap_ip[0][0], conf->snmp_option.trap_ip[0][1],
-                     conf->snmp_option.trap_ip[0][2], conf->snmp_option.trap_ip[0][3],
-                     conf->snmp_option.trap_ip[1][0], conf->snmp_option.trap_ip[1][1],
-                     conf->snmp_option.trap_ip[1][2], conf->snmp_option.trap_ip[1][3]);
+    uint16_t sess_min = conf->https_session_timeout_min;
+    if (sess_min < HTTPS_SESSION_TIMEOUT_MIN_MIN || sess_min > HTTPS_SESSION_TIMEOUT_MIN_MAX) {
+        sess_min = HTTPS_SESSION_TIMEOUT_MIN_DEFAULT;
+    }
+    int n = 0;
+    n += snprintf(body + n, sizeof(body) - n, "{");
+    /* Network (network_common / network_option) */
+    n += snprintf(body + n, sizeof(body) - n,
+                  "\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",",
+                  conf->network_common.mac[0], conf->network_common.mac[1],
+                  conf->network_common.mac[2], conf->network_common.mac[3],
+                  conf->network_common.mac[4], conf->network_common.mac[5]);
+    n += snprintf(body + n, sizeof(body) - n,
+                  "\"ip\":\"%u.%u.%u.%u\",\"gateway\":\"%u.%u.%u.%u\","
+                  "\"subnet\":\"%u.%u.%u.%u\",\"dhcp\":%u,",
+                  conf->network_common.local_ip[0], conf->network_common.local_ip[1],
+                  conf->network_common.local_ip[2], conf->network_common.local_ip[3],
+                  conf->network_common.gateway[0], conf->network_common.gateway[1],
+                  conf->network_common.gateway[2], conf->network_common.gateway[3],
+                  conf->network_common.subnet[0], conf->network_common.subnet[1],
+                  conf->network_common.subnet[2], conf->network_common.subnet[3],
+                  conf->network_option.dhcp_use ? 1u : 0u);
+    for (int i = 0; i < SNMP_ALLOWED_IP_CNT; i++) {
+        const uint8_t *ip = conf->snmp_option.allowed_ip[i];
+        n += snprintf(body + n, sizeof(body) - n,
+                      "\"allowed_ip%d\":\"%u.%u.%u.%u\",", i, ip[0], ip[1], ip[2], ip[3]);
+    }
+    for (int i = 0; i < SNMP_TRAP_IP_CNT; i++) {
+        const uint8_t *ip = conf->snmp_option.trap_ip[i];
+        n += snprintf(body + n, sizeof(body) - n,
+                      "\"trap_ip%d\":\"%u.%u.%u.%u\",", i, ip[0], ip[1], ip[2], ip[3]);
+    }
+    for (int i = 0; i < WEB_ACCESS_IP_CNT; i++) {
+        const uint8_t *ip = conf->web_access_ip[i];
+        n += snprintf(body + n, sizeof(body) - n,
+                      "\"web_ip%d\":\"%u.%u.%u.%u\",", i, ip[0], ip[1], ip[2], ip[3]);
+    }
+    n += snprintf(body + n, sizeof(body) - n, "\"session_timeout\":%u,", (unsigned int)sess_min);
+    {
+        uint16_t hp = conf->https_port ? conf->https_port : HTTPS_PORT_DEFAULT;
+        uint16_t sp = conf->snmp_agent_port ? conf->snmp_agent_port : SNMP_AGENT_PORT_DEFAULT;
+        n += snprintf(body + n, sizeof(body) - n,
+                      "\"https_port\":%u,\"snmp_port\":%u,", (unsigned int)hp, (unsigned int)sp);
+    }
+    /* RS-232 (uart1 / serial_option) */
+    n += snprintf(body + n, sizeof(body) - n,
+                  "\"serial_baud\":%u,\"serial_data\":%u,\"serial_parity\":%u,"
+                  "\"serial_flow\":%u,\"serial_mode\":%u,",
+                  conf->serial_option.baud_rate, conf->serial_option.data_bits,
+                  conf->serial_option.parity, conf->serial_option.flow_control,
+                  conf->serial_option.protocol);
+    /* RS-485 (uart0 / serial_option_485) */
+    n += snprintf(body + n, sizeof(body) - n,
+                  "\"serial485_baud\":%u,\"serial485_data\":%u,\"serial485_parity\":%u,"
+                  "\"serial485_flow\":%u,\"serial485_mode\":%u}",
+                  conf->serial_option_485.baud_rate, conf->serial_option_485.data_bits,
+                  conf->serial_option_485.parity, conf->serial_option_485.flow_control,
+                  conf->serial_option_485.protocol);
     int hlen = snprintf(header, sizeof(header),
                         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                         "Content-Length: %d\r\nConnection: close\r\n\r\n", n);
@@ -419,7 +468,7 @@ static int https_send_config_json(wiz_tls_context *tls_ctx) {
 
 static int https_handle_config_post(wiz_tls_context *tls_ctx, const char *body) {
     DevConfig *conf = get_DevConfig_pointer();
-    static unsigned char post_extra_buf[256];
+    static unsigned char post_extra_buf[768];
     const char *actual_body = body;
 
     if (!actual_body || *actual_body == '\0') {
@@ -429,36 +478,153 @@ static int https_handle_config_post(wiz_tls_context *tls_ctx, const char *body) 
             actual_body = (const char *)post_extra_buf;
         }
     }
-
     if (actual_body && *actual_body != '\0') {
-        static const char *keys[4] = {
-            "\"allowed_ip0\":\"", "\"allowed_ip1\":\"",
-            "\"trap_ip0\":\"",    "\"trap_ip1\":\""
-        };
-        static const size_t klens[4] = { 15, 15, 12, 12 };
         uint8_t changed = 0;
-        for (int k = 0; k < 4; k++) {
-            const char *p = strstr(actual_body, keys[k]);
+
+        /* Network: ip / gateway / subnet (IPv4 dotted), dhcp (0/1). */
+        struct {
+            const char *key;
+            uint8_t *octets;
+        } netf[] = {
+            { "\"ip\":\"",      conf->network_common.local_ip },
+            { "\"gateway\":\"", conf->network_common.gateway },
+            { "\"subnet\":\"",  conf->network_common.subnet },
+        };
+        for (int q = 0; q < (int)(sizeof(netf) / sizeof(netf[0])); q++) {
+            const char *p = strstr(actual_body, netf[q].key);
             if (p) {
-                p += klens[k];
+                p += strlen(netf[q].key);
                 unsigned int a = 0, b = 0, c = 0, d = 0;
                 if (sscanf(p, "%u.%u.%u.%u", &a, &b, &c, &d) == 4) {
-                    uint8_t *ip = (k < 2)
+                    netf[q].octets[0] = (uint8_t)a; netf[q].octets[1] = (uint8_t)b;
+                    netf[q].octets[2] = (uint8_t)c; netf[q].octets[3] = (uint8_t)d;
+                    changed = 1;
+                }
+            }
+        }
+        {
+            const char *dp = strstr(actual_body, "\"dhcp\":");
+            if (dp) {
+                dp += strlen("\"dhcp\":");
+                unsigned int v = 0;
+                if (sscanf(dp, "%u", &v) == 1) {
+                    conf->network_option.dhcp_use = v ? 1 : 0;
+                    changed = 1;
+                }
+            }
+        }
+
+        /* WEB access source-IP allow list (6-D): web_ip0 / web_ip1 */
+        for (int w = 0; w < WEB_ACCESS_IP_CNT; w++) {
+            char key[16];
+            snprintf(key, sizeof(key), "\"web_ip%d\":\"", w);
+            const char *p = strstr(actual_body, key);
+            if (p) {
+                p += strlen(key);
+                unsigned int a = 0, b = 0, c = 0, d = 0;
+                if (sscanf(p, "%u.%u.%u.%u", &a, &b, &c, &d) == 4) {
+                    conf->web_access_ip[w][0] = (uint8_t)a; conf->web_access_ip[w][1] = (uint8_t)b;
+                    conf->web_access_ip[w][2] = (uint8_t)c; conf->web_access_ip[w][3] = (uint8_t)d;
+                    changed = 1;
+                }
+            }
+        }
+
+        for (int k = 0; k < SNMP_ALLOWED_IP_CNT + SNMP_TRAP_IP_CNT; k++) {
+            char key[24];
+            if (k < SNMP_ALLOWED_IP_CNT) {
+                snprintf(key, sizeof(key), "\"allowed_ip%d\":\"", k);
+            } else {
+                snprintf(key, sizeof(key), "\"trap_ip%d\":\"", k - SNMP_ALLOWED_IP_CNT);
+            }
+            const char *p = strstr(actual_body, key);
+            if (p) {
+                p += strlen(key);
+                unsigned int a = 0, b = 0, c = 0, d = 0;
+                if (sscanf(p, "%u.%u.%u.%u", &a, &b, &c, &d) == 4) {
+                    uint8_t *ip = (k < SNMP_ALLOWED_IP_CNT)
                                   ? conf->snmp_option.allowed_ip[k]
-                                  : conf->snmp_option.trap_ip[k - 2];
+                                  : conf->snmp_option.trap_ip[k - SNMP_ALLOWED_IP_CNT];
                     ip[0] = (uint8_t)a; ip[1] = (uint8_t)b;
                     ip[2] = (uint8_t)c; ip[3] = (uint8_t)d;
                     changed = 1;
                 }
             }
         }
+        const char *ps = strstr(actual_body, "\"session_timeout\":");
+        if (ps) {
+            ps += strlen("\"session_timeout\":");
+            unsigned int v = 0;
+            if (sscanf(ps, "%u", &v) == 1 &&
+                    v >= HTTPS_SESSION_TIMEOUT_MIN_MIN && v <= HTTPS_SESSION_TIMEOUT_MIN_MAX) {
+                conf->https_session_timeout_min = (uint16_t)v;
+                changed = 1;
+            }
+        }
+
+        /*  Service ports (uint16_t, 1..65535). Write DIRECTLY through the packed
+            DevConfig — taking &conf->https_port as a uint16_t* and storing through it
+            loses the packed attribute, producing an unaligned 16-bit STRH that
+            HardFaults on Cortex-M0+ (https_port sits at an odd offset after the
+            9-byte serial_option_485). Direct member writes are emitted byte-safe. */
+        {
+            const char *pp = strstr(actual_body, "\"https_port\":");
+            if (pp) {
+                unsigned int v = 0;
+                if (sscanf(pp + strlen("\"https_port\":"), "%u", &v) == 1 && v >= 1 && v <= 65535) {
+                    conf->https_port = (uint16_t)v;
+                    changed = 1;
+                }
+            }
+            pp = strstr(actual_body, "\"snmp_port\":");
+            if (pp) {
+                unsigned int v = 0;
+                if (sscanf(pp + strlen("\"snmp_port\":"), "%u", &v) == 1 && v >= 1 && v <= 65535) {
+                    conf->snmp_agent_port = (uint16_t)v;
+                    changed = 1;
+                }
+            }
+        }
+
+        /*  Serial port settings (#11). Each value validated against its enum range;
+            applied on next boot (DATA0_UART_Configuration / init_rs485_uart read these). */
+        struct {
+            const char *key;
+            uint8_t *field;
+            unsigned int max;
+        } sfields[] = {
+            { "\"serial_baud\":",   &conf->serial_option.baud_rate,    19 },
+            { "\"serial_data\":",   &conf->serial_option.data_bits,    2  },
+            { "\"serial_parity\":", &conf->serial_option.parity,       2  },
+            { "\"serial_flow\":",   &conf->serial_option.flow_control, 4  },
+            { "\"serial_mode\":",   &conf->serial_option.protocol,     2  },
+            { "\"serial485_baud\":",   &conf->serial_option_485.baud_rate,    19 },
+            { "\"serial485_data\":",   &conf->serial_option_485.data_bits,    2  },
+            { "\"serial485_parity\":", &conf->serial_option_485.parity,       2  },
+            { "\"serial485_flow\":",   &conf->serial_option_485.flow_control, 4  },
+            { "\"serial485_mode\":",   &conf->serial_option_485.protocol,     2  },
+        };
+        for (int s = 0; s < (int)(sizeof(sfields) / sizeof(sfields[0])); s++) {
+            const char *sp = strstr(actual_body, sfields[s].key);
+            if (sp) {
+                sp += strlen(sfields[s].key);
+                unsigned int v = 0;
+                if (sscanf(sp, "%u", &v) == 1 && v <= sfields[s].max) {
+                    *sfields[s].field = (uint8_t)v;
+                    changed = 1;
+                }
+            }
+        }
+
         if (changed) {
             save_DevConfig_to_storage();
             snmp_request_reinit();
+            PRT_SSL("cfgPOST: config saved\r\n");
         }
     }
 
-    return https_send_config_json(tls_ctx);
+    int rc = https_send_config_json(tls_ctx);
+    return rc;
 }
 
 /*  -----------------------------------------------------------------------
@@ -589,6 +755,36 @@ static void handle_get_account(wiz_tls_context *ctx, const char *session, const 
     send_html(ctx, body, strlen(body));
 }
 
+/*  Password policy (shared by account creation / password change):
+    - length 8 ~ 16 characters
+    - at least one uppercase letter [A-Z]
+    - at least one special character (printable, non-alphanumeric)
+    Returns NULL if the password is acceptable, otherwise a short reason string. */
+static const char *validate_password(const char *pw) {
+    size_t len = strlen(pw);
+    if (len < 8 || len > 16) {
+        return "password must be 8-16 characters";
+    }
+    int has_upper = 0, has_special = 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)pw[i];
+        if (c >= 'A' && c <= 'Z') {
+            has_upper = 1;
+        } else if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))) {
+            if (c > 0x20 && c < 0x7f) {     /* printable, non-alphanumeric */
+                has_special = 1;
+            }
+        }
+    }
+    if (!has_upper) {
+        return "password needs an uppercase letter";
+    }
+    if (!has_special) {
+        return "password needs a special character";
+    }
+    return NULL;
+}
+
 static void handle_post_account_add(wiz_tls_context *ctx, const char *session,
                                     const char *body_str) {
     if (!https_auth_verify_session(session)) {
@@ -609,6 +805,10 @@ static void handle_post_account_add(wiz_tls_context *ctx, const char *session,
     }
     if (strlen(user) == 0 || strlen(pass) == 0) {
         send_redirect(ctx, "/account?err=4");
+        return;
+    }
+    if (validate_password(pass) != NULL) {
+        send_redirect(ctx, "/account?err=5");   /* weak password */
         return;
     }
 
@@ -748,6 +948,11 @@ static void handle_post_api_account_add(wiz_tls_context *ctx,
         https_send_json_result(ctx, 0, "empty field");
         return;
     }
+    const char *pw_err = validate_password(pass);
+    if (pw_err != NULL) {
+        https_send_json_result(ctx, 0, pw_err);
+        return;
+    }
     int ret = https_auth_create_account(user, pass);
     if (ret ==  0) {
         https_send_json_result(ctx, 1, "created");
@@ -758,6 +963,19 @@ static void handle_post_api_account_add(wiz_tls_context *ctx,
     } else {
         https_send_json_result(ctx, 0, "error");
     }
+}
+
+static void handle_post_api_reboot(wiz_tls_context *ctx, const char *session) {
+    if (!https_auth_verify_session(session)) {
+        https_send_json_result(ctx, 0, "no session");
+        return;
+    }
+    https_send_json_result(ctx, 1, "rebooting");
+    /* Let the TLS response reach the browser before we tear the link down. */
+    stdio_flush();
+    vTaskDelay(pdMS_TO_TICKS(300));
+    PRT_SSL("reboot requested via web\r\n");
+    device_reboot();
 }
 
 static void handle_post_api_account_del(wiz_tls_context *ctx,
@@ -774,6 +992,40 @@ static void handle_post_api_account_del(wiz_tls_context *ctx,
     }
     int ret = https_auth_delete_account(user);
     https_send_json_result(ctx, ret == 0 ? 1 : 0, ret == 0 ? "deleted" : "not found");
+}
+
+static void handle_post_api_account_passwd(wiz_tls_context *ctx,
+        const char *session, const char *body_str) {
+    if (!https_auth_verify_session(session)) {
+        https_send_json_result(ctx, 0, "no session");
+        return;
+    }
+    char user[HTTPS_USER_LEN] = {0};
+    char oldp[64]             = {0};
+    char newp[64]             = {0};
+    json_get_field(body_str, "user",    user, sizeof(user));
+    json_get_field(body_str, "oldpass", oldp, sizeof(oldp));
+    json_get_field(body_str, "newpass", newp, sizeof(newp));
+
+    if (strlen(user) == 0 || strlen(oldp) == 0 || strlen(newp) == 0) {
+        https_send_json_result(ctx, 0, "empty field");
+        return;
+    }
+    const char *pw_err = validate_password(newp);
+    if (pw_err != NULL) {
+        https_send_json_result(ctx, 0, pw_err);
+        return;
+    }
+    int ret = https_auth_change_password(user, oldp, newp);
+    if (ret == 0) {
+        https_send_json_result(ctx, 1, "changed");
+    } else if (ret == -5) {
+        https_send_json_result(ctx, 0, "wrong current password");
+    } else if (ret == -1) {
+        https_send_json_result(ctx, 0, "user not found");
+    } else {
+        https_send_json_result(ctx, 0, "error");
+    }
 }
 
 /*  -----------------------------------------------------------------------
@@ -847,6 +1099,10 @@ static void dispatch_request(wiz_tls_context *ctx, const char *req) {
             handle_post_api_account_add(ctx, session, body);
         } else if (strcmp(path, "/api/accounts/del") == 0) {
             handle_post_api_account_del(ctx, session, body);
+        } else if (strcmp(path, "/api/accounts/passwd") == 0) {
+            handle_post_api_account_passwd(ctx, session, body);
+        } else if (strcmp(path, "/api/reboot") == 0) {
+            handle_post_api_reboot(ctx, session);
         } else if (strcmp(path, "/api/config") == 0) {
             if (!https_auth_verify_session(session)) {
                 send_redirect(ctx, "/login");
@@ -874,6 +1130,34 @@ static void https_close_session(uint8_t sock, wiz_tls_context *ctx, uint8_t *tls
         disconnect(sock);
         close(sock);
     }
+}
+
+/*  Source-IP allow list for the HTTPS web server (6-D). The peer IP of a freshly
+    established connection is checked against DevConfig.web_access_ip; if every
+    slot is 0.0.0.0 the list is treated as "allow any". Returns 1 if allowed. */
+static int web_access_allowed(uint8_t sock) {
+    DevConfig *conf = get_DevConfig_pointer();
+    int any = 1;
+    for (int k = 0; k < WEB_ACCESS_IP_CNT; k++) {
+        if (conf->web_access_ip[k][0] | conf->web_access_ip[k][1] |
+                conf->web_access_ip[k][2] | conf->web_access_ip[k][3]) {
+            any = 0;
+            break;
+        }
+    }
+    if (any) {
+        return 1;
+    }
+    uint8_t peer[4];
+    getSn_DIPR(sock, peer);
+    for (int k = 0; k < WEB_ACCESS_IP_CNT; k++) {
+        if (memcmp(peer, conf->web_access_ip[k], 4) == 0) {
+            return 1;
+        }
+    }
+    PRT_SSL("HTTPS socket[%d] rejected: %u.%u.%u.%u not in access list\r\n",
+            sock, peer[0], peer[1], peer[2], peer[3]);
+    return 0;
 }
 
 /*  -----------------------------------------------------------------------
@@ -912,12 +1196,17 @@ void http_webserver_task(void *argument) {
             }
 
             switch (sock_state) {
-            case SOCK_CLOSED:
-                if (socket(sock, Sn_MR_TCP, HTTPS_SERVER_PORT, 0x00) == sock) {
-                    PRT_SSL("HTTPS socket[%d] opened on port %d\r\n", sock, HTTPS_SERVER_PORT);
+            case SOCK_CLOSED: {
+                uint16_t hport = get_DevConfig_pointer()->https_port;
+                if (hport == 0) {
+                    hport = HTTPS_PORT_DEFAULT;
+                }
+                if (socket(sock, Sn_MR_TCP, hport, 0x00) == sock) {
+                    PRT_SSL("HTTPS socket[%d] opened on port %d\r\n", sock, hport);
                     listen(sock);
                 }
                 break;
+            }
 
             case SOCK_INIT:
                 listen(sock);
@@ -929,6 +1218,12 @@ void http_webserver_task(void *argument) {
                 }
 
                 if (!https_tls_active[i]) {
+                    /* Reject disallowed source IPs before any TLS work (6-D). */
+                    if (!web_access_allowed(sock)) {
+                        https_close_session(sock, &https_tls_ctx[i], &https_tls_active[i]);
+                        https_response_sent[i] = FALSE;
+                        break;
+                    }
                     if (getSn_RX_RSR(sock) == 0) {
                         break;
                     }

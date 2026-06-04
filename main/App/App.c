@@ -170,7 +170,9 @@ static void set_minimal_runtime_config(void) {
     dev_config->network_connection.working_mode = TCP_SERVER_MODE;
     dev_config->network_connection.dns_use = DISABLE;
     dev_config->serial_option.uart_interface = UART_IF_RS232_TTL;
-    dev_config->serial_option.flow_control   = flow_none;
+    /*  NOTE: flow_control is no longer forced here — it comes from stored
+        serial_option so the web "Handshake" setting (#11) persists across reboot.
+        baud_rate / data_bits / parity / protocol were never forced (stored). */
 }
 
 void heap_monitor_task(void *argument) {

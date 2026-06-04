@@ -184,15 +184,36 @@ struct __mqtt_option {
 */
 
 /* SNMP option lives in the extension section */
+#define SNMP_ALLOWED_IP_CNT   4
+#define SNMP_TRAP_IP_CNT      4
 struct __snmp_option {
-    uint8_t allowed_ip[2][4];
-    uint8_t trap_ip[2][4];
+    uint8_t allowed_ip[SNMP_ALLOWED_IP_CNT][4];
+    uint8_t trap_ip[SNMP_TRAP_IP_CNT][4];
 } __attribute__((packed));
 
 #define DEVCONFIG_EXT_MAGIC      0x57495A45UL  /* 'WIZE' (LE: 45 5A 49 57) */
-#define DEVCONFIG_EXT_VERSION    1
+/*  ext_version history:
+      2: allowed_ip/trap_ip slots 2->4 (struct __snmp_option grew 16B)
+      3: add serial_option_485 (RS-485 = uart0 gets its own baud/format,
+         independent of legacy serial_option which drives RS-232 = uart1)
+      4: add https_port / snmp_agent_port (web-configurable service ports)
+      5: add web_access_ip[2][4] (HTTPS source-IP allow list; 0.0.0.0 => any)
+    Devices with an older ext_version re-init the extension area on first boot. */
+#define DEVCONFIG_EXT_VERSION    5
 #define DEVCONFIG_RESERVED_LEGACY_SIZE  64
-#define DEVCONFIG_RESERVED_EXT_SIZE    128
+/*  reserved_ext shrinks as named ext fields are added, keeping sizeof(DevConfig)
+    constant so existing flash blobs stay layout-compatible.
+    89 = 128 - https_session_timeout_min(2) - snmp_option slot growth(16)
+             - sizeof(struct __serial_option)(9) - https_port(2) - snmp_agent_port(2)
+             - web_access_ip(8). */
+#define DEVCONFIG_RESERVED_EXT_SIZE    89
+
+/* Service port defaults / bounds (0 stored => use default at runtime). */
+#define HTTPS_PORT_DEFAULT        443
+#define SNMP_AGENT_PORT_DEFAULT   161
+
+/* HTTPS web access source-IP allow list (0.0.0.0 in all slots => allow any). */
+#define WEB_ACCESS_IP_CNT         2
 
 typedef struct __DevConfig {
     /* ---- LEGACY SECTION (frozen layout) ---- */
@@ -221,8 +242,19 @@ typedef struct __DevConfig {
     uint16_t ext_version;
     uint16_t ext_reserved0;
     struct __snmp_option snmp_option;
+    uint16_t https_session_timeout_min;   /* HTTPS login session lifetime (min); 0 => default */
+    struct __serial_option serial_option_485;  /* RS-485 (uart0) port settings, independent of
+                                                  legacy serial_option which drives RS-232 (uart1) */
+    uint16_t https_port;        /* HTTPS server TCP port; 0 => HTTPS_PORT_DEFAULT (443) */
+    uint16_t snmp_agent_port;   /* SNMP agent UDP port; 0 => SNMP_AGENT_PORT_DEFAULT (161) */
+    uint8_t  web_access_ip[WEB_ACCESS_IP_CNT][4];  /* HTTPS source-IP allow list; all 0 => any */
     uint8_t reserved_ext[DEVCONFIG_RESERVED_EXT_SIZE];
 } __attribute__((packed)) DevConfig;
+
+/* HTTPS session timeout bounds (minutes). 0/out-of-range => DEFAULT. */
+#define HTTPS_SESSION_TIMEOUT_MIN_DEFAULT  30
+#define HTTPS_SESSION_TIMEOUT_MIN_MIN      1
+#define HTTPS_SESSION_TIMEOUT_MIN_MAX      1440
 
 DevConfig* get_DevConfig_pointer(void);
 void set_DevConfig_to_factory_value(void);

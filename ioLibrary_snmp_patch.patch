@@ -1,5 +1,5 @@
 diff --git a/Internet/SNMP/snmp.c b/Internet/SNMP/snmp.c
-index b705097..cf64b88 100644
+index b705097..d93de0a 100644
 --- a/Internet/SNMP/snmp.c
 +++ b/Internet/SNMP/snmp.c
 @@ -13,6 +13,7 @@
@@ -19,25 +19,42 @@ index b705097..cf64b88 100644
  int32_t parseRequest();
  int32_t parseCommunity();
  int32_t parseVersion();
-@@ -55,6 +58,17 @@ static uint8_t SOCK_SNMP_TRAP;
+@@ -55,6 +58,34 @@ static uint8_t SOCK_SNMP_TRAP;
  
  uint8_t packet_trap[MAX_TRAPMSG_LEN] = {0,};
  uint8_t errorStatus, errorIndex;
 +static uint8_t snmp_version = SNMP_V1;
 +
-+static uint8_t s_allowed_ip[2][4] = {{0},{0}};
++#define SNMP_ALLOWED_IP_SLOTS  4
++static uint8_t s_allowed_ip[SNMP_ALLOWED_IP_SLOTS][4] = {{0},{0},{0},{0}};
 +static uint8_t s_allowed_any = 1;
 +
-+void snmp_set_allowed_ips(const uint8_t allowed[2][4])
++/* Runtime-configurable agent listening port (0 keeps the compile-time default). */
++static uint16_t s_agent_port = PORT_SNMP_AGENT;
++
++void snmp_set_agent_port(uint16_t port)
 +{
++    if (port != 0) {
++        s_agent_port = port;
++    }
++}
++
++void snmp_set_allowed_ips(const uint8_t allowed[4][4])
++{
++    int i;
 +    memcpy(s_allowed_ip, allowed, sizeof(s_allowed_ip));
-+    s_allowed_any = ((allowed[0][0] | allowed[0][1] | allowed[0][2] | allowed[0][3]) == 0) &&
-+                    ((allowed[1][0] | allowed[1][1] | allowed[1][2] | allowed[1][3]) == 0);
++    s_allowed_any = 1;
++    for (i = 0; i < SNMP_ALLOWED_IP_SLOTS; i++) {
++        if ((allowed[i][0] | allowed[i][1] | allowed[i][2] | allowed[i][3]) != 0) {
++            s_allowed_any = 0;   /* at least one slot set => restrict */
++            break;
++        }
++    }
 +}
  
  
  /********************************************************************************************/
-@@ -105,12 +119,19 @@ void snmpd_init(uint8_t * managerIP, uint8_t * agentIP, uint8_t sn_agent, uint8_
+@@ -105,12 +136,19 @@ void snmpd_init(uint8_t * managerIP, uint8_t * agentIP, uint8_t sn_agent, uint8_
      SOCK_SNMP_AGENT = sn_agent;
      SOCK_SNMP_TRAP = sn_trap;
  
@@ -60,7 +77,7 @@ index b705097..cf64b88 100644
  
  /*
      // Example Codes for SNMP Trap
-@@ -150,7 +171,7 @@ int32_t snmpd_run(void)
+@@ -150,7 +188,7 @@ int32_t snmpd_run(void)
  	uint8_t svr_addr[6];
  	uint16_t  svr_port;
  
@@ -69,19 +86,36 @@ index b705097..cf64b88 100644
      
  	switch(getSn_SR(SOCK_SNMP_AGENT))
  	{
-@@ -158,6 +179,11 @@ int32_t snmpd_run(void)
+@@ -158,6 +196,15 @@ int32_t snmpd_run(void)
  			if ( (len = getSn_RX_RSR(SOCK_SNMP_AGENT)) > 0)
  			{
  				request_msg.len= recvfrom(SOCK_SNMP_AGENT, request_msg.buffer, len, svr_addr, &svr_port);
-+				if (!s_allowed_any &&
-+				    memcmp(svr_addr, s_allowed_ip[0], 4) != 0 &&
-+				    memcmp(svr_addr, s_allowed_ip[1], 4) != 0) {
-+					request_msg.len = 0;
++				if (!s_allowed_any) {
++					int ai, matched = 0;
++					for (ai = 0; ai < SNMP_ALLOWED_IP_SLOTS; ai++) {
++						if (memcmp(svr_addr, s_allowed_ip[ai], 4) == 0) { matched = 1; break; }
++					}
++					if (!matched) {
++						request_msg.len = 0;
++					}
 +				}
  			}
  			else
  			{
-@@ -220,6 +246,37 @@ int32_t findEntry(uint8_t *oid, int32_t len)
+@@ -188,10 +235,10 @@ int32_t snmpd_run(void)
+ 			break;
+ 
+ 		case SOCK_CLOSED :
+-			if((ret = socket(SOCK_SNMP_AGENT, Sn_MR_UDP, PORT_SNMP_AGENT, 0x00)) != SOCK_SNMP_AGENT)
++			if((ret = socket(SOCK_SNMP_AGENT, Sn_MR_UDP, s_agent_port, 0x00)) != SOCK_SNMP_AGENT)
+ 				return ret;
+ #ifdef _SNMP_DEBUG_
+-			printf(" - [%d] UDP Socket for SNMP Agent, port [%d]\r\n", SOCK_SNMP_AGENT, PORT_SNMP_AGENT);
++			printf(" - [%d] UDP Socket for SNMP Agent, port [%d]\r\n", SOCK_SNMP_AGENT, s_agent_port);
+ #endif
+ 			break;
+ 
+@@ -220,6 +267,37 @@ int32_t findEntry(uint8_t *oid, int32_t len)
  }
  
  
@@ -119,7 +153,7 @@ index b705097..cf64b88 100644
  int32_t getOID(int32_t id, uint8_t *oid, uint8_t *len)
  {
  	int32_t j;
-@@ -336,7 +393,7 @@ int32_t setEntry(int32_t id, void *val, int32_t vlen, uint8_t dataType, int32_t
+@@ -336,7 +414,7 @@ int32_t setEntry(int32_t id, void *val, int32_t vlen, uint8_t dataType, int32_t
  
  	if (snmpData[id].dataType != dataType)
  	{
@@ -128,7 +162,7 @@ index b705097..cf64b88 100644
  		errorIndex = index;
  		return INVALID_DATA_TYPE;
  	}
-@@ -423,6 +480,7 @@ int32_t parseTLV(const uint8_t *msg, int32_t index, tlvStructType *tlv)
+@@ -423,6 +501,7 @@ int32_t parseTLV(const uint8_t *msg, int32_t index, tlvStructType *tlv)
  	case GET_REQUEST:
  	case GET_NEXT_REQUEST:
  	case SET_REQUEST:
@@ -136,7 +170,7 @@ index b705097..cf64b88 100644
  		tlv->nstart = tlv->vstart;
  		break;
  	default:
-@@ -483,7 +541,12 @@ int32_t parseVarBind(int32_t reqType, int32_t index)
+@@ -483,7 +562,12 @@ int32_t parseVarBind(int32_t reqType, int32_t index)
  	{
  		response_msg.buffer[response_msg.index] = request_msg.buffer[name.start];
  
@@ -150,7 +184,7 @@ index b705097..cf64b88 100644
  		{
  			id = OID_NOT_FOUND;
  			seglen = name.nstart - name.start;
-@@ -530,11 +593,24 @@ int32_t parseVarBind(int32_t reqType, int32_t index)
+@@ -530,11 +614,24 @@ int32_t parseVarBind(int32_t reqType, int32_t index)
  	}
  	else
  	{
@@ -179,7 +213,7 @@ index b705097..cf64b88 100644
  	}
  
  	size += seglen;
-@@ -565,6 +641,136 @@ int32_t parseSequence(int32_t reqType, int32_t index)
+@@ -565,6 +662,136 @@ int32_t parseSequence(int32_t reqType, int32_t index)
  }
  
  
@@ -316,7 +350,7 @@ index b705097..cf64b88 100644
  int32_t parseSequenceOf(int32_t reqType)
  {
  	int32_t seglen;
-@@ -625,7 +831,23 @@ int32_t parseRequest()
+@@ -625,7 +852,23 @@ int32_t parseRequest()
  	size += seglen;
  	COPY_SEGMENT(errIndex);
  
@@ -341,7 +375,7 @@ index b705097..cf64b88 100644
  	if (ret == -1) return -1;
  	else size += ret;
  
-@@ -678,8 +900,9 @@ int32_t parseVersion()
+@@ -678,8 +921,9 @@ int32_t parseVersion()
  
  	size = parseTLV(request_msg.buffer, request_msg.index, &tlv);
  
@@ -353,7 +387,7 @@ index b705097..cf64b88 100644
  
  	seglen = tlv.nstart - tlv.start;
  	size += seglen;
-@@ -879,12 +1102,119 @@ int32_t snmp_sendTrap(uint8_t * managerIP, uint8_t * agentIP, int8_t* community,
+@@ -879,12 +1123,119 @@ int32_t snmp_sendTrap(uint8_t * managerIP, uint8_t * agentIP, int8_t* community,
  	{
  		socket(SOCK_SNMP_TRAP, Sn_MR_UDP, PORT_SNMP_TRAP, 0);
  		sendto(SOCK_SNMP_TRAP, packet_trap, packet_index, managerIP, PORT_SNMP_TRAP);
@@ -475,7 +509,7 @@ index b705097..cf64b88 100644
  void dumpCode(uint8_t* header, uint8_t* tail, uint8_t *buff, int32_t len)
  {
 diff --git a/Internet/SNMP/snmp.h b/Internet/SNMP/snmp.h
-index 02c83fd..9cc1ba6 100644
+index 02c83fd..ea9ac4a 100644
 --- a/Internet/SNMP/snmp.h
 +++ b/Internet/SNMP/snmp.h
 @@ -12,10 +12,11 @@ extern "C" {
@@ -538,11 +572,12 @@ index 02c83fd..9cc1ba6 100644
  
  // SNMP Trap: Standard Trap Types (Generic)
  #define SNMPTRAP_COLDSTART			0x00	// Generic trap-type 0: Cold Start
-@@ -107,8 +127,10 @@ typedef struct {
+@@ -107,8 +127,11 @@ typedef struct {
  /********************************************************************************************/
  // SNMP Main functions
  void snmpd_init(uint8_t * managerIP, uint8_t * agentIP, uint8_t sn_agent, uint8_t sn_trap);
-+void snmp_set_allowed_ips(const uint8_t allowed[2][4]);
++void snmp_set_allowed_ips(const uint8_t allowed[4][4]);
++void snmp_set_agent_port(uint16_t port);
  int32_t snmpd_run(void);
  int32_t snmp_sendTrap(uint8_t * managerIP, uint8_t * agentIP, int8_t* community, dataEntryType enterprise_oid, uint32_t genericTrap, uint32_t specificTrap, uint32_t va_count, ...);
 +int32_t snmp_sendTrapV2c(uint8_t * managerIP, uint8_t * agentIP, int8_t* community, dataEntryType enterprise_oid, uint32_t genericTrap, uint32_t specificTrap, uint32_t va_count, ...);

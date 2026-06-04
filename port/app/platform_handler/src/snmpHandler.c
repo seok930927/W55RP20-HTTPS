@@ -51,7 +51,9 @@ static void snmp_agent_init(void) {
     }
 
     DevConfig *conf = get_DevConfig_pointer();
-    snmp_set_allowed_ips((const uint8_t (*)[4])conf->snmp_option.allowed_ip);
+    uint16_t agent_port = conf->snmp_agent_port ? conf->snmp_agent_port : SNMP_AGENT_PORT_DEFAULT;
+    snmp_set_allowed_ips((const uint8_t (*)[4])conf->snmp_option.allowed_ip);  /* 4 slots */
+    snmp_set_agent_port(agent_port);
     snmpd_init(NULL, snmp_agent_ip, SOCK_SNMP_AGENT, SOCK_SNMP_TRAP);
     snmp_initialized = TRUE;
 
@@ -60,7 +62,7 @@ static void snmp_agent_init(void) {
              snmp_agent_ip[1],
              snmp_agent_ip[2],
              snmp_agent_ip[3],
-             PORT_SNMP_AGENT);
+             agent_port);
 }
 
 void snmp_request_reinit(void) {
@@ -89,7 +91,7 @@ static void snmp_flush_traps(void) {
         snmp_trap_q_tail = (uint8_t)((snmp_trap_q_tail + 1) % SNMP_TRAP_QUEUE_LEN);
         taskEXIT_CRITICAL();
 
-        for (int t = 0; t < 2; t++) {
+        for (int t = 0; t < SNMP_TRAP_IP_CNT; t++) {
             const uint8_t *mgr = conf->snmp_option.trap_ip[t];
             if ((mgr[0] | mgr[1] | mgr[2] | mgr[3]) == 0) {
                 continue;                     /* trap destination not set */

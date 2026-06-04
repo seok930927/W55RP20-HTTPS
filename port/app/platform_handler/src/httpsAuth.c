@@ -4,11 +4,22 @@
 #include "httpsAuth.h"
 #include "storageHandler.h"
 #include "deviceHandler.h"
+#include "ConfigData.h"
 #include "mbedtls/sha256.h"
 #include "psa/crypto.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "WIZ5XXSR-RP_Debug.h"
+
+/*  Session lifetime in ms, read at runtime from DevConfig
+    (https_session_timeout_min). 0 or out-of-range falls back to the default. */
+static uint32_t session_timeout_ms(void) {
+    uint16_t m = get_DevConfig_pointer()->https_session_timeout_min;
+    if (m < HTTPS_SESSION_TIMEOUT_MIN_MIN || m > HTTPS_SESSION_TIMEOUT_MIN_MAX) {
+        m = HTTPS_SESSION_TIMEOUT_MIN_DEFAULT;
+    }
+    return (uint32_t)m * 60U * 1000U;
+}
 
 /*
     SHA-256("wiznet_w55rp20")
@@ -132,6 +143,31 @@ int https_auth_delete_account(const char *user) {
     return -1;
 }
 
+int https_auth_change_password(const char *user, const char *old_pass, const char *new_pass) {
+    if (strlen(new_pass) == 0) {
+        return -3;
+    }
+    uint8_t old_hash[HTTPS_HASH_LEN];
+    sha256_str(old_pass, old_hash);
+
+    for (int i = 0; i < s_store.count; i++) {
+        if (!s_store.accounts[i].valid) {
+            continue;
+        }
+        if (strncmp(s_store.accounts[i].user, user, HTTPS_USER_LEN) != 0) {
+            continue;
+        }
+        if (memcmp(s_store.accounts[i].pass_hash, old_hash, HTTPS_HASH_LEN) != 0) {
+            return -5;   /* current password mismatch */
+        }
+        sha256_str(new_pass, s_store.accounts[i].pass_hash);
+        store_save();
+        PRT_INFO("HTTPS Auth: password changed for '%s'\r\n", user);
+        return 0;
+    }
+    return -1;   /* user not found */
+}
+
 int https_auth_login(const char *user, const char *pass, char *token_out) {
     uint8_t hash[HTTPS_HASH_LEN];
     sha256_str(pass, hash);
@@ -150,7 +186,7 @@ int https_auth_login(const char *user, const char *pass, char *token_out) {
         uint32_t now = xTaskGetTickCount();
         for (int j = 0; j < HTTPS_MAX_SESSIONS; j++) {
             if (!s_sessions[j].valid ||
-                    (now - s_sessions[j].created_at) >= HTTPS_SESSION_TIMEOUT_MS) {
+                    (now - s_sessions[j].created_at) >= session_timeout_ms()) {
                 psa_generate_random(s_sessions[j].token, HTTPS_SESSION_TOKEN_LEN);
                 s_sessions[j].created_at = now;
                 s_sessions[j].valid      = 1;
@@ -177,7 +213,7 @@ int https_auth_verify_session(const char *token_hex) {
         if (!s_sessions[i].valid) {
             continue;
         }
-        if ((now - s_sessions[i].created_at) >= HTTPS_SESSION_TIMEOUT_MS) {
+        if ((now - s_sessions[i].created_at) >= session_timeout_ms()) {
             s_sessions[i].valid = 0;
             continue;
         }
@@ -216,7 +252,7 @@ int https_auth_verify_pass_for_session(const char *token_hex, const char *pass) 
         if (!s_sessions[i].valid) {
             continue;
         }
-        if ((now - s_sessions[i].created_at) >= HTTPS_SESSION_TIMEOUT_MS) {
+        if ((now - s_sessions[i].created_at) >= session_timeout_ms()) {
             s_sessions[i].valid = 0;
             continue;
         }

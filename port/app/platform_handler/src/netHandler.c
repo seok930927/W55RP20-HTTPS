@@ -78,8 +78,20 @@ void net_status_task(void *argument) {
             xSemaphoreGive(net_http_webserver_sem);
             xSemaphoreGive(net_segcp_tcp_sem);
             ctlnetwork(CN_GET_NETINFO, (void *)&gWIZNETINFO);
-            printf("HTTPS server ready: https://%d.%d.%d.%d/\r\n",
-                   gWIZNETINFO.ip[0], gWIZNETINFO.ip[1], gWIZNETINFO.ip[2], gWIZNETINFO.ip[3]);
+            {
+                uint16_t hport = get_DevConfig_pointer()->https_port;
+                if (hport == 0) {
+                    hport = HTTPS_PORT_DEFAULT;
+                }
+                if (hport == 443) {
+                    printf("HTTPS server ready: https://%d.%d.%d.%d/\r\n",
+                           gWIZNETINFO.ip[0], gWIZNETINFO.ip[1], gWIZNETINFO.ip[2], gWIZNETINFO.ip[3]);
+                } else {
+                    printf("HTTPS server ready: https://%d.%d.%d.%d:%u/\r\n",
+                           gWIZNETINFO.ip[0], gWIZNETINFO.ip[1], gWIZNETINFO.ip[2], gWIZNETINFO.ip[3],
+                           (unsigned int)hport);
+                }
+            }
             break;
 
         case NET_IP_UP:

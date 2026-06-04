@@ -15,7 +15,11 @@ typedef struct {
     uint32_t data_len;
 } mutation_operation_t;
 
-static uint8_t *flash_buf = NULL;
+/*  Sector scratch buffer for flash program. Was pvPortMalloc'd per write, but an
+    allocation failure (heap pressure during an active TLS session, e.g. saving
+    /api/config) returned NULL and the unchecked memset(NULL,...) hard-faulted →
+    instant reboot. A static buffer removes the heap dependency entirely. */
+static uint8_t flash_buf[FLASH_SECTOR_SIZE];
 static critical_section_t g_flash_cri_sec;
 extern xSemaphoreHandle flash_critical_sem;
 
@@ -84,10 +88,8 @@ void write_flash(uint32_t addr, uint8_t * data, uint32_t data_len) {
     mop.data = data;
     mop.data_len = data_len;
 
-    flash_buf = pvPortMalloc(FLASH_SECTOR_SIZE);
     memset(flash_buf, 0x00, FLASH_SECTOR_SIZE);
     flash_safe_execute(flash_mudation_operation, &mop, 0xFFFFFFFF);
-    vPortFree(flash_buf);
 }
 
 

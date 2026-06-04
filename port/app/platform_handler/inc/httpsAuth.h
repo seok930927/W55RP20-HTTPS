@@ -40,6 +40,7 @@ void https_auth_init(void);
 int  https_auth_account_count(void);
 int  https_auth_verify_creation_pass(const char *pass);
 int  https_auth_create_account(const char *user, const char *pass);
+int  https_auth_change_password(const char *user, const char *old_pass, const char *new_pass);
 int  https_auth_delete_account(const char *user);
 int  https_auth_login(const char *user, const char *pass, char *token_out);
 int  https_auth_verify_session(const char *token_hex);

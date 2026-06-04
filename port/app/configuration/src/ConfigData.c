@@ -223,6 +223,22 @@ void set_DevConfig_ext_to_factory_value(void) {
     memset(dev_config.snmp_option.allowed_ip, 0x00, sizeof(dev_config.snmp_option.allowed_ip));
     memset(dev_config.snmp_option.trap_ip,    0x00, sizeof(dev_config.snmp_option.trap_ip));
 
+    dev_config.https_session_timeout_min = HTTPS_SESSION_TIMEOUT_MIN_DEFAULT;
+
+    /* RS-485 (uart0) defaults — independent of legacy serial_option (RS-232). */
+    memset(&dev_config.serial_option_485, 0x00, sizeof(dev_config.serial_option_485));
+    dev_config.serial_option_485.uart_interface = UART_IF_RS485;
+    dev_config.serial_option_485.protocol       = SEG_SERIAL_PROTOCOL_NONE;
+    dev_config.serial_option_485.baud_rate       = baud_115200;
+    dev_config.serial_option_485.data_bits       = word_len8;
+    dev_config.serial_option_485.parity          = parity_none;
+    dev_config.serial_option_485.stop_bits       = stop_bit1;
+    dev_config.serial_option_485.flow_control    = flow_none;
+
+    dev_config.https_port      = HTTPS_PORT_DEFAULT;
+    dev_config.snmp_agent_port = SNMP_AGENT_PORT_DEFAULT;
+    memset(dev_config.web_access_ip, 0x00, sizeof(dev_config.web_access_ip)); /* allow any */
+
     memset(dev_config.reserved_ext, 0x00, sizeof(dev_config.reserved_ext));
 }
 

@@ -133,6 +133,12 @@ th {
     border: 1px solid #7e8d98;
     text-align: center;
 }
+.pw-hint {
+    font-size: 16px;
+    color: #6b7a85;
+    margin-left: 10px;
+    white-space: nowrap;
+}
 /* Modal */
 .modal-overlay {
     display: none;
@@ -218,6 +224,18 @@ th {
   </div>
 </div>
 
+<div class="modal-overlay" id="reboot-modal">
+  <div class="modal-box">
+    <div class="modal-title">저장 완료</div>
+    <div class="modal-desc" id="reboot-desc">네트워크 · 포트 · 시리얼 설정은 <b>재부팅 후</b> 적용됩니다.<br>지금 재부팅하시겠습니까?<br><br>IP를 바꿨다면 재부팅 후 <b>새 주소</b>로 다시 접속하세요.</div>
+    <div class="modal-err" id="reboot-err"></div>
+    <div class="modal-btns">
+      <button class="btn-confirm" onclick="doReboot()">지금 재부팅</button>
+      <button class="btn-cancel" onclick="closeRebootModal()">나중에</button>
+    </div>
+  </div>
+</div>
+
 <div class="page">
     <nav class="topnav">
         <ul class="menu">
@@ -256,6 +274,41 @@ th {
         <div id="tab-config" style="display:none">
             <div class="content-header">[ 환경설정 ]</div>
 
+            <div style="text-align:center; padding:10px 0 4px">
+                <button class="btn-save" onclick="saveConfig()">환경설정 전체 저장</button>
+                <span class="save-status" style="font-size:20px; margin-left:14px; color:#0f5b87"></span>
+            </div>
+
+            <section class="section">
+                <div class="section-title">네트워크 설정 (재부팅 후 적용)</div>
+                <table style="width:auto; margin:0">
+                    <tr>
+                        <th style="width:140px">MAC 주소</th>
+                        <td><span id="net_mac" style="font-size:22px">-</span></td>
+                    </tr>
+                    <tr>
+                        <th>DHCP</th>
+                        <td>
+                            <select id="net_dhcp" class="ip-input">
+                                <option value="0">STATIC (고정 IP)</option>
+                                <option value="1">DHCP (자동)</option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>IP 주소</th>
+                        <td><input type="text" id="net_ip" class="ip-input" placeholder="192.168.0.200"></td>
+                    </tr>
+                    <tr>
+                        <th>게이트웨이</th>
+                        <td><input type="text" id="net_gateway" class="ip-input" placeholder="192.168.0.1"></td>
+                    </tr>
+                    <tr>
+                        <th>서브넷 마스크</th>
+                        <td><input type="text" id="net_subnet" class="ip-input" placeholder="255.255.255.0"></td>
+                    </tr>
+                </table>
+            </section>
             <section class="section">
                 <div class="section-title">SNMP 수신가능 IP (0.0.0.0=전체허용)</div>
                 <table>
@@ -264,6 +317,12 @@ th {
                         <td><input type="text" id="allowed_ip0" class="ip-input" placeholder="0.0.0.0"></td>
                         <th>수신가능 IP #2</th>
                         <td><input type="text" id="allowed_ip1" class="ip-input" placeholder="0.0.0.0"></td>
+                    </tr>
+                    <tr>
+                        <th>수신가능 IP #3</th>
+                        <td><input type="text" id="allowed_ip2" class="ip-input" placeholder="0.0.0.0"></td>
+                        <th>수신가능 IP #4</th>
+                        <td><input type="text" id="allowed_ip3" class="ip-input" placeholder="0.0.0.0"></td>
                     </tr>
                 </table>
             </section>
@@ -276,10 +335,161 @@ th {
                         <th>트랩 수신 IP #2</th>
                         <td><input type="text" id="trap_ip1" class="ip-input" placeholder="0.0.0.0"></td>
                     </tr>
+                    <tr>
+                        <th>트랩 수신 IP #3</th>
+                        <td><input type="text" id="trap_ip2" class="ip-input" placeholder="0.0.0.0"></td>
+                        <th>트랩 수신 IP #4</th>
+                        <td><input type="text" id="trap_ip3" class="ip-input" placeholder="0.0.0.0"></td>
+                    </tr>
+                </table>
+            </section>
+            <section class="section">
+                <div class="section-title">서비스 포트 (재부팅 후 적용)</div>
+                <table style="width:auto; margin:0">
+                    <tr>
+                        <th style="width:140px">HTTPS 포트</th>
+                        <td><input type="number" id="https_port" class="ip-input" min="1" max="65535" placeholder="443">
+                            <span class="pw-hint">기본 443</span></td>
+                    </tr>
+                    <tr>
+                        <th>SNMP 포트</th>
+                        <td><input type="number" id="snmp_port" class="ip-input" min="1" max="65535" placeholder="161">
+                            <span class="pw-hint">기본 161</span></td>
+                    </tr>
+                </table>
+            </section>
+            <section class="section">
+                <div class="section-title">WEB 접근 허용 IP (0.0.0.0=전체허용)</div>
+                <table>
+                    <tr>
+                        <th>접근 허용 IP #1</th>
+                        <td><input type="text" id="web_ip0" class="ip-input" placeholder="0.0.0.0"></td>
+                        <th>접근 허용 IP #2</th>
+                        <td><input type="text" id="web_ip1" class="ip-input" placeholder="0.0.0.0"></td>
+                    </tr>
+                </table>
+            </section>
+            <section class="section">
+                <div class="section-title">HTTPS 세션 유효시간</div>
+                <table>
+                    <tr>
+                        <th>세션 갱신 주기 (분)</th>
+                        <td><input type="number" id="session_timeout" class="ip-input" min="1" max="1440" placeholder="30">
+                            <span class="pw-hint">1 ~ 1440분 (기본 30분)</span></td>
+                    </tr>
+                </table>
+            </section>
+            <section class="section">
+                <div class="section-title">시리얼 설정 — RS-232 (uart1) (재부팅 후 적용)</div>
+                <table style="width:auto; margin:0">
+                    <tr>
+                        <th style="width:140px">Baud</th>
+                        <td>
+                            <select id="serial_baud" class="ip-input">
+                                <option value="0">300</option><option value="1">600</option>
+                                <option value="2">1200</option><option value="3">1800</option>
+                                <option value="4">2400</option><option value="5">4800</option>
+                                <option value="6">9600</option><option value="7">14400</option>
+                                <option value="8">19200</option><option value="9">28800</option>
+                                <option value="10">38400</option><option value="11">57600</option>
+                                <option value="12">115200</option><option value="13">230400</option>
+                                <option value="14">460800</option><option value="15">921600</option>
+                                <option value="16">1000000</option><option value="17">2000000</option>
+                                <option value="18">4000000</option><option value="19">8000000</option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Data size</th>
+                        <td>
+                            <select id="serial_data" class="ip-input">
+                                <option value="0">7</option><option value="1">8</option><option value="2">9</option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Parity</th>
+                        <td>
+                            <select id="serial_parity" class="ip-input">
+                                <option value="0">none</option><option value="1">odd</option><option value="2">even</option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Handshake</th>
+                        <td>
+                            <select id="serial_flow" class="ip-input">
+                                <option value="0">OFF</option><option value="1">XON/XOFF</option><option value="2">RTS/CTS</option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Mode</th>
+                        <td>
+                            <select id="serial_mode" class="ip-input">
+                                <option value="0">Free</option><option value="1">Modbus RTU</option><option value="2">Modbus ASCII</option>
+                            </select>
+                        </td>
+                    </tr>
+                </table>
+            </section>
+            <section class="section">
+                <div class="section-title">시리얼 설정 — RS-485 (uart0) (재부팅 후 적용)</div>
+                <table style="width:auto; margin:0">
+                    <tr>
+                        <th style="width:140px">Baud</th>
+                        <td>
+                            <select id="serial485_baud" class="ip-input">
+                                <option value="0">300</option><option value="1">600</option>
+                                <option value="2">1200</option><option value="3">1800</option>
+                                <option value="4">2400</option><option value="5">4800</option>
+                                <option value="6">9600</option><option value="7">14400</option>
+                                <option value="8">19200</option><option value="9">28800</option>
+                                <option value="10">38400</option><option value="11">57600</option>
+                                <option value="12">115200</option><option value="13">230400</option>
+                                <option value="14">460800</option><option value="15">921600</option>
+                                <option value="16">1000000</option><option value="17">2000000</option>
+                                <option value="18">4000000</option><option value="19">8000000</option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Data size</th>
+                        <td>
+                            <select id="serial485_data" class="ip-input">
+                                <option value="0">7</option><option value="1">8</option><option value="2">9</option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Parity</th>
+                        <td>
+                            <select id="serial485_parity" class="ip-input">
+                                <option value="0">none</option><option value="1">odd</option><option value="2">even</option>
+                            </select>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Handshake</th>
+                        <td>
+                            <select id="serial485_flow" class="ip-input">
+                                <option value="0">OFF</option><option value="1">XON/XOFF</option><option value="2">RTS/CTS</option>
+                            </select>
+                            <span class="pw-hint">RS-485은 반이중 — DE 자동제어</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Mode</th>
+                        <td>
+                            <select id="serial485_mode" class="ip-input">
+                                <option value="0">Free</option><option value="1">Modbus RTU</option><option value="2">Modbus ASCII</option>
+                            </select>
+                        </td>
+                    </tr>
                 </table>
                 <div style="text-align:center; padding:14px">
                     <button class="btn-save" onclick="saveConfig()">저장</button>
-                    <span id="save_status" style="font-size:20px; margin-left:14px; color:#0f5b87"></span>
+                    <span id="save_status" class="save-status" style="font-size:20px; margin-left:14px; color:#0f5b87"></span>
                 </div>
             </section>
 
@@ -302,7 +512,8 @@ th {
                         </tr>
                         <tr>
                             <th>PW</th>
-                            <td><input type="password" id="add-pass" class="ip-input"></td>
+                            <td><input type="password" id="add-pass" class="ip-input">
+                                <span class="pw-hint">8~16자, 대문자 1개 이상, 특수문자 1개 이상</span></td>
                         </tr>
                     </table>
                     <div style="padding:10px 0 14px">
@@ -310,13 +521,33 @@ th {
                         <span id="acc-status" style="font-size:18px; margin-left:12px"></span>
                     </div>
                 </div>
+                <div style="padding:12px 16px 4px; border-top:1px solid #bbb; margin-top:4px">
+                    <div style="font-size:22px; font-weight:bold; margin-bottom:8px">비밀번호 변경</div>
+                    <table style="width:auto; margin:0">
+                        <tr>
+                            <th style="width:120px">ID</th>
+                            <td><input type="text" id="chg-user" class="ip-input" autocomplete="off"></td>
+                        </tr>
+                        <tr>
+                            <th>현재 PW</th>
+                            <td><input type="password" id="chg-oldpass" class="ip-input"></td>
+                        </tr>
+                        <tr>
+                            <th>새 PW</th>
+                            <td><input type="password" id="chg-newpass" class="ip-input">
+                                <span class="pw-hint">8~16자, 대문자 1개 이상, 특수문자 1개 이상</span></td>
+                        </tr>
+                    </table>
+                    <div style="padding:10px 0 14px">
+                        <button class="btn-save" onclick="changePassword()">비밀번호 변경</button>
+                        <span id="chg-status" style="font-size:18px; margin-left:12px"></span>
+                    </div>
+                </div>
             </section>
         </div>
     </main>
 </div>
 <script>
-var configUnlocked = false;
-
 function escHtml(s){return String(s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function fmtValue(v, col){
     var scaled = v * Math.pow(10, col.scale);
@@ -362,12 +593,23 @@ function upd(d){
     document.getElementById('comm_check').textContent=d.comm.check;
     document.getElementById('comm_flag').textContent=d.comm.flag;
 }
-function poll(){fetch('/api/sensors').then(function(r){return r.json();}).then(upd).catch(function(){});}
+/* Session expiry → server replies with a redirect to /login. Detect it and
+   move the whole page to the login screen (auto-logout). */
+function authRedirect(r){
+    if(r.redirected || r.status===401){ location.href='/login'; return true; }
+    return false;
+}
+function poll(){
+    fetch('/api/sensors').then(function(r){
+        if(authRedirect(r)) return null;
+        return r.json();
+    }).then(function(d){ if(d) upd(d); }).catch(function(){});
+}
 setInterval(poll,3000);
 poll();
 
 function showTab(tab){
-    if(tab==='config' && !configUnlocked){
+    if(tab==='config'){
         document.getElementById('pass-modal').classList.add('show');
         setTimeout(function(){document.getElementById('modal-pass').focus();},50);
         return;
@@ -389,7 +631,6 @@ function verifyPass(){
         body:JSON.stringify({pass:pass})
     }).then(function(r){return r.json();}).then(function(d){
         if(d.ok){
-            configUnlocked=true;
             document.getElementById('pass-modal').classList.remove('show');
             document.getElementById('modal-pass').value='';
             _doShowTab('config');
@@ -406,38 +647,112 @@ function closePassModal(){
 }
 
 var IP_RE=/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+var CFG_IPS=['allowed_ip0','allowed_ip1','allowed_ip2','allowed_ip3',
+             'trap_ip0','trap_ip1','trap_ip2','trap_ip3',
+             'web_ip0','web_ip1'];
+var CFG_SERIAL=['serial_baud','serial_data','serial_parity','serial_flow','serial_mode',
+                'serial485_baud','serial485_data','serial485_parity','serial485_flow','serial485_mode'];
 function loadConfig(){
-    fetch('/api/config').then(function(r){return r.json();}).then(function(d){
-        document.getElementById('allowed_ip0').value=d.allowed_ip0;
-        document.getElementById('allowed_ip1').value=d.allowed_ip1;
-        document.getElementById('trap_ip0').value=d.trap_ip0;
-        document.getElementById('trap_ip1').value=d.trap_ip1;
+    fetch('/api/config').then(function(r){
+        if(authRedirect(r)) return null;
+        return r.json();
+    }).then(function(d){
+        if(!d) return;
+        document.getElementById('net_mac').textContent=d.mac||'-';
+        document.getElementById('net_dhcp').value=d.dhcp;
+        document.getElementById('net_ip').value=d.ip;
+        document.getElementById('net_gateway').value=d.gateway;
+        document.getElementById('net_subnet').value=d.subnet;
+        for(var i=0;i<CFG_IPS.length;i++){
+            var el=document.getElementById(CFG_IPS[i]);
+            if(el) el.value=d[CFG_IPS[i]];
+        }
+        document.getElementById('session_timeout').value=d.session_timeout;
+        document.getElementById('https_port').value=d.https_port;
+        document.getElementById('snmp_port').value=d.snmp_port;
+        for(var s=0;s<CFG_SERIAL.length;s++){
+            var se=document.getElementById(CFG_SERIAL[s]);
+            if(se && d[CFG_SERIAL[s]]!=null) se.value=d[CFG_SERIAL[s]];
+        }
     }).catch(function(){});
 }
+function cfgStatus(msg,color){
+    var els=document.querySelectorAll('.save-status');
+    for(var k=0;k<els.length;k++){els[k].textContent=msg;els[k].style.color=color||'#0f5b87';}
+}
 function saveConfig(){
-    var ids=['allowed_ip0','allowed_ip1','trap_ip0','trap_ip1'];
     var vals={};
-    var st=document.getElementById('save_status');
-    for(var i=0;i<ids.length;i++){
-        var v=document.getElementById(ids[i]).value.trim();
-        if(!IP_RE.test(v)){st.textContent='IP 형식 오류: '+ids[i];return;}
-        vals[ids[i]]=v;
+    var dhcp=parseInt(document.getElementById('net_dhcp').value,10);
+    vals.dhcp=dhcp;
+    var netIds=['net_ip','net_gateway','net_subnet'];
+    var netKeys=['ip','gateway','subnet'];
+    for(var j=0;j<netIds.length;j++){
+        var nv=document.getElementById(netIds[j]).value.trim();
+        if(!IP_RE.test(nv)){cfgStatus('네트워크 IP 형식 오류: '+netKeys[j],'red');return;}
+        vals[netKeys[j]]=nv;
     }
-    st.textContent='저장 중...';
+    for(var i=0;i<CFG_IPS.length;i++){
+        var v=document.getElementById(CFG_IPS[i]).value.trim();
+        if(!IP_RE.test(v)){cfgStatus('IP 형식 오류: '+CFG_IPS[i],'red');return;}
+        vals[CFG_IPS[i]]=v;
+    }
+    var to=parseInt(document.getElementById('session_timeout').value,10);
+    if(isNaN(to)||to<1||to>1440){cfgStatus('세션 시간은 1~1440분','red');return;}
+    vals.session_timeout=to;
+    var hp=parseInt(document.getElementById('https_port').value,10);
+    if(isNaN(hp)||hp<1||hp>65535){cfgStatus('HTTPS 포트는 1~65535','red');return;}
+    vals.https_port=hp;
+    var sp=parseInt(document.getElementById('snmp_port').value,10);
+    if(isNaN(sp)||sp<1||sp>65535){cfgStatus('SNMP 포트는 1~65535','red');return;}
+    vals.snmp_port=sp;
+    for(var s=0;s<CFG_SERIAL.length;s++){
+        vals[CFG_SERIAL[s]]=parseInt(document.getElementById(CFG_SERIAL[s]).value,10);
+    }
+    cfgStatus('저장 중...','#0f5b87');
     fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify(vals)
-    }).then(function(r){return r.json();}).then(function(d){
-        document.getElementById('allowed_ip0').value=d.allowed_ip0;
-        document.getElementById('allowed_ip1').value=d.allowed_ip1;
-        document.getElementById('trap_ip0').value=d.trap_ip0;
-        document.getElementById('trap_ip1').value=d.trap_ip1;
-        st.textContent='저장 완료';
-        setTimeout(function(){st.textContent='';},3000);
-    }).catch(function(){st.textContent='저장 실패';});
+    }).then(function(r){
+        if(authRedirect(r)) return null;
+        return r.json();
+    }).then(function(d){
+        if(!d) return;
+        document.getElementById('net_mac').textContent=d.mac||'-';
+        document.getElementById('net_dhcp').value=d.dhcp;
+        document.getElementById('net_ip').value=d.ip;
+        document.getElementById('net_gateway').value=d.gateway;
+        document.getElementById('net_subnet').value=d.subnet;
+        for(var i=0;i<CFG_IPS.length;i++){
+            var el=document.getElementById(CFG_IPS[i]);
+            if(el) el.value=d[CFG_IPS[i]];
+        }
+        document.getElementById('session_timeout').value=d.session_timeout;
+        document.getElementById('https_port').value=d.https_port;
+        document.getElementById('snmp_port').value=d.snmp_port;
+        for(var s=0;s<CFG_SERIAL.length;s++){
+            var se=document.getElementById(CFG_SERIAL[s]);
+            if(se && d[CFG_SERIAL[s]]!=null) se.value=d[CFG_SERIAL[s]];
+        }
+        cfgStatus('저장 완료','#0a7a0a');
+        document.getElementById('reboot-err').textContent='';
+        document.getElementById('reboot-modal').classList.add('show');
+    }).catch(function(){cfgStatus('저장 실패','red');});
+}
+function closeRebootModal(){
+    document.getElementById('reboot-modal').classList.remove('show');
+}
+function doReboot(){
+    document.getElementById('reboot-err').textContent='재부팅 중... 잠시 후 새 주소로 다시 접속하세요.';
+    fetch('/api/reboot',{method:'POST'}).catch(function(){});
+    /* device drops the connection on reboot; nudge the user to the login page */
+    setTimeout(function(){ location.href='/login'; }, 6000);
 }
 
 function loadAccounts(){
-    fetch('/api/accounts').then(function(r){return r.json();}).then(function(d){
+    fetch('/api/accounts').then(function(r){
+        if(authRedirect(r)) return null;
+        return r.json();
+    }).then(function(d){
+        if(!d) return;
         var tbl=document.getElementById('acc-table');
         while(tbl.rows.length>1)tbl.deleteRow(1);
         for(var i=0;i<d.list.length;i++){
@@ -465,12 +780,20 @@ function loadAccounts(){
         }
     }).catch(function(){});
 }
+function validatePassword(pw){
+    if(pw.length<8||pw.length>16) return '비밀번호는 8~16자여야 합니다';
+    if(!/[A-Z]/.test(pw)) return '대문자를 1자 이상 포함해야 합니다';
+    if(!/[^A-Za-z0-9]/.test(pw)) return '특수문자를 1자 이상 포함해야 합니다';
+    return null;
+}
 function addAccount(){
     var cpass=document.getElementById('add-cpass').value;
     var user=document.getElementById('add-user').value.trim();
     var pass=document.getElementById('add-pass').value;
     var st=document.getElementById('acc-status');
     if(!cpass||!user||!pass){st.textContent='모든 항목을 입력하세요';st.style.color='red';return;}
+    var pwErr=validatePassword(pass);
+    if(pwErr){st.textContent=pwErr;st.style.color='red';return;}
     st.textContent='처리 중...';st.style.color='#0f5b87';
     fetch('/api/accounts/add',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({cpass:cpass,user:user,pass:pass})
@@ -481,6 +804,29 @@ function addAccount(){
             document.getElementById('add-user').value='';
             document.getElementById('add-pass').value='';
             loadAccounts();
+            setTimeout(function(){st.textContent='';},3000);
+        } else {
+            st.textContent='오류: '+d.msg;st.style.color='red';
+        }
+    }).catch(function(){st.textContent='오류 발생';st.style.color='red';});
+}
+function changePassword(){
+    var user=document.getElementById('chg-user').value.trim();
+    var oldp=document.getElementById('chg-oldpass').value;
+    var newp=document.getElementById('chg-newpass').value;
+    var st=document.getElementById('chg-status');
+    if(!user||!oldp||!newp){st.textContent='모든 항목을 입력하세요';st.style.color='red';return;}
+    var pwErr=validatePassword(newp);
+    if(pwErr){st.textContent=pwErr;st.style.color='red';return;}
+    st.textContent='처리 중...';st.style.color='#0f5b87';
+    fetch('/api/accounts/passwd',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({user:user,oldpass:oldp,newpass:newp})
+    }).then(function(r){return r.json();}).then(function(d){
+        if(d.ok){
+            st.textContent='비밀번호 변경 완료';st.style.color='#0a7a0a';
+            document.getElementById('chg-user').value='';
+            document.getElementById('chg-oldpass').value='';
+            document.getElementById('chg-newpass').value='';
             setTimeout(function(){st.textContent='';},3000);
         } else {
             st.textContent='오류: '+d.msg;st.style.color='red';

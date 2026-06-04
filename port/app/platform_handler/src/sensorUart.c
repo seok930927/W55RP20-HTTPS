@@ -86,11 +86,12 @@ static void sensorUart_rs485_rx_isr(void) {
 }
 
 /*  ===== RS-485 UART (uart0) initialisation =================================
-    Reads baud/parity/data-bits from DevConfig so both ports match.
+    Reads baud/parity/data-bits from DevConfig.serial_option_485 — the RS-485
+    port has its OWN settings, independent of RS-232 (uart1 / serial_option).
     ========================================================================= */
 static void init_rs485_uart(void) {
     struct __serial_option *opt =
-        (struct __serial_option *) & (get_DevConfig_pointer()->serial_option);
+        (struct __serial_option *) & (get_DevConfig_pointer()->serial_option_485);
 
     uart_init(uart0, 115200);
 
