@@ -101,11 +101,20 @@ int modbus_read_th(uint8_t slave, int16_t *temp, int16_t *hum) {
 
     mb_flush_rx();
 
-    /* RS-232 full-duplex: just transmit, no DE direction control. */
+    /*  Drive the RTS/485SEL line around the frame when the port runs in RS-485
+        mode. Both helpers are no-ops for TTL/RS-232 and RS-422, and
+        uart_rs485_disable() waits for the shift register to drain before it
+        releases the bus, so the slave never sees a truncated frame. */
+#ifdef __USE_UART_485_422__
+    uart_rs485_enable();
+#endif
     for (int i = 0; i < 8; i++) {
         uart_putc_raw(uart1, req[i]);
     }
     uart_tx_wait_blocking(uart1);
+#ifdef __USE_UART_485_422__
+    uart_rs485_disable();
+#endif
 
     uint8_t rsp[MODBUS_RSP_LEN];
     int n = mb_recv(rsp, MODBUS_RSP_LEN, MODBUS_RSP_TIMEOUT);

@@ -67,14 +67,16 @@ void set_DevConfig_to_factory_value(void) {
     dev_config.config_common.packet_size = sizeof(DevConfig);
     memset(dev_config.config_common.pw_search, 0x00, sizeof(dev_config.config_common.pw_search));
 
+    /*  TEMP: band moved back to 192.168.11.x for on-site testing.
+        Production default is 192.168.0.200 / 192.168.0.1 — restore before release. */
     dev_config.network_common.local_ip[0] = 192;
     dev_config.network_common.local_ip[1] = 168;
-    dev_config.network_common.local_ip[2] = 0;
+    dev_config.network_common.local_ip[2] = 11;
     dev_config.network_common.local_ip[3] = 200;
 
     dev_config.network_common.gateway[0] = 192;
     dev_config.network_common.gateway[1] = 168;
-    dev_config.network_common.gateway[2] = 0;
+    dev_config.network_common.gateway[2] = 11;
     dev_config.network_common.gateway[3] = 1;
 
     dev_config.network_common.subnet[0] = 255;

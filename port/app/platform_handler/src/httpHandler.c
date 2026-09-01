@@ -397,7 +397,10 @@ static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
 
 static int https_send_config_json(wiz_tls_context *tls_ctx) {
     DevConfig *conf = get_DevConfig_pointer();
-    char body[768];
+    /*  The snprintf chain below never checks `n` against the buffer, so this must
+        stay comfortably above the worst-case body (~675 B measured).
+        Grow it whenever a field is appended. */
+    char body[1024];
     char header[128];
     uint16_t sess_min = conf->https_session_timeout_min;
     if (sess_min < HTTPS_SESSION_TIMEOUT_MIN_MIN || sess_min > HTTPS_SESSION_TIMEOUT_MIN_MAX) {

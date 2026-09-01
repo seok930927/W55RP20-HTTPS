@@ -202,8 +202,8 @@ void DATA0_UART_Configuration(void) {
         break;
     }
 
-    /* Set Parity Bits — uart_set_format_parity() maps the enum, including the
-       space/mark stick-parity modes. Only the range check lives here. */
+    /*  Set Parity Bits — uart_set_format_parity() maps the enum, including the
+        space/mark stick-parity modes. Only the range check lives here. */
     if (serial_option->parity > parity_mark) {
         serial_option->parity = parity_none;
     }
@@ -211,6 +211,10 @@ void DATA0_UART_Configuration(void) {
 
     /* Flow Control */
     if (serial_option->uart_interface == UART_IF_RS232_TTL) {
+        /*  Full duplex: no direction line. Recording the mode here keeps
+            uart_rs485_enable()/disable() no-ops by intent rather than by relying
+            on the initial value of uart_if_mode. */
+        uart_if_mode = UART_IF_RS232_TTL;
         // RS232 Hardware Flow Control
         //7     RTS     Request To Send     Output
         //8     CTS     Clear To Send       Input

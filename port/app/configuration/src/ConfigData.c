@@ -70,14 +70,16 @@ void set_DevConfig_to_factory_value(void) {
     dev_config.config_common.packet_size = sizeof(DevConfig);
     memset(dev_config.config_common.pw_search, 0x00, sizeof(dev_config.config_common.pw_search));
 
+    /*  TEMP: band moved back to 192.168.11.x for on-site testing.
+        Production default is 192.168.0.200 / 192.168.0.1 — restore before release. */
     dev_config.network_common.local_ip[0] = 192;
     dev_config.network_common.local_ip[1] = 168;
-    dev_config.network_common.local_ip[2] = 0;
+    dev_config.network_common.local_ip[2] = 11;
     dev_config.network_common.local_ip[3] = 200;
 
     dev_config.network_common.gateway[0] = 192;
     dev_config.network_common.gateway[1] = 168;
-    dev_config.network_common.gateway[2] = 0;
+    dev_config.network_common.gateway[2] = 11;
     dev_config.network_common.gateway[3] = 1;
 
     dev_config.network_common.subnet[0] = 255;
@@ -293,6 +295,11 @@ void load_DevConfig_from_storage(void) {
         save_DevConfig_to_storage();
     }
 
+    /*  uart_interface is recomputed on every boot and never trusted from flash.
+        It has to stay that way: the bootloader owns the same byte with a
+        DIFFERENT enum (boot has an extra UART_IF_RS232 = 1, shifting everything
+        below it) and rewrites it after a firmware update. Trusting the stored
+        value would let a boot-written 1 arrive here as UART_IF_RS422. */
     if ((dev_config.serial_option.flow_control == flow_rtsonly) || (dev_config.serial_option.flow_control == flow_reverserts)) { // Edit for supporting RTS only in 17/3/28 , recommend adapting to WIZ750SR
         dev_config.serial_option.uart_interface = UART_IF_RS422;    //temporarily set RS422, Actual setting is done in DATA0_UART_Configuration.
     } else {
