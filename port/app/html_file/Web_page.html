@@ -198,12 +198,45 @@ th {
     border: none; font-size: 20px; cursor: pointer; border-radius: 4px;
 }
 .btn-cancel:hover { background: #666; }
+/* 환경설정 좌측 네비 */
+.cfg-layout {
+    display: flex;
+    align-items: flex-start;
+    margin: 18px;
+}
+.cfg-nav {
+    flex: 0 0 230px;
+    border: 1px solid #7e8d98;
+    background: #ececec;
+    box-sizing: border-box;
+}
+.cfg-nav ul { list-style: none; margin: 0; padding: 0; }
+.cfg-nav li {
+    padding: 14px 16px;
+    border-bottom: 1px solid #cdd6dc;
+    font-size: 20px;
+    font-weight: bold;
+    color: #4a4a4a;
+    cursor: pointer;
+}
+.cfg-nav li:last-child { border-bottom: none; }
+.cfg-nav li:hover { background: #e8f0f7; }
+.cfg-nav li.active { background: #0f5b87; color: #fff; }
+.cfg-panels { flex: 1; min-width: 0; }
+.cfg-panels .section { margin: 0 0 0 18px; }
+.cfg-panels .section + .section { margin-top: 18px; }
 @media (max-width: 900px) {
     .menu { flex-direction: column; }
     .menu li { border-right: none; border-bottom: 1px solid #cdd6dc; }
     .menu li:last-child { border-bottom: none; }
     .menu li, .content-header, .section-title, th, td, .footer { font-size: 16px; }
     .sensor-table th, .sensor-table td { font-size: 14px; padding: 4px 2px; }
+    .cfg-layout { flex-direction: column; margin: 12px; }
+    .cfg-nav { flex: none; width: 100%; }
+    .cfg-nav ul { display: flex; flex-wrap: wrap; }
+    .cfg-nav li { flex: 1 1 45%; font-size: 14px; padding: 8px 10px; }
+    .cfg-panels { width: 100%; }
+    .cfg-panels .section { margin: 12px 0 0 0; }
 }
 </style>
 </head>
@@ -279,7 +312,22 @@ th {
                 <span class="save-status" style="font-size:20px; margin-left:14px; color:#0f5b87"></span>
             </div>
 
-            <section class="section">
+            <div class="cfg-layout">
+                <nav class="cfg-nav">
+                    <ul>
+                        <li id="nav-cfg-net" class="active" onclick="showCfg('cfg-net')">네트워크</li>
+                        <li id="nav-cfg-snmpip" onclick="showCfg('cfg-snmpip')">SNMP 허용 IP</li>
+                        <li id="nav-cfg-trapip" onclick="showCfg('cfg-trapip')">SNMP 트랩 IP</li>
+                        <li id="nav-cfg-ports" onclick="showCfg('cfg-ports')">서비스 포트</li>
+                        <li id="nav-cfg-webip" onclick="showCfg('cfg-webip')">WEB 허용 IP</li>
+                        <li id="nav-cfg-session" onclick="showCfg('cfg-session')">세션 유효시간</li>
+                        <li id="nav-cfg-serial" onclick="showCfg('cfg-serial')">시리얼 설정</li>
+                        <li id="nav-cfg-acc" onclick="showCfg('cfg-acc')">계정 관리</li>
+                    </ul>
+                </nav>
+                <div class="cfg-panels">
+
+            <section class="section" id="cfg-net">
                 <div class="section-title">네트워크 설정 (재부팅 후 적용)</div>
                 <table style="width:auto; margin:0">
                     <tr>
@@ -309,7 +357,7 @@ th {
                     </tr>
                 </table>
             </section>
-            <section class="section">
+            <section class="section" id="cfg-snmpip" style="display:none">
                 <div class="section-title">SNMP 수신가능 IP (0.0.0.0=전체허용)</div>
                 <table>
                     <tr>
@@ -326,7 +374,7 @@ th {
                     </tr>
                 </table>
             </section>
-            <section class="section">
+            <section class="section" id="cfg-trapip" style="display:none">
                 <div class="section-title">SNMP 트랩 수신 IP</div>
                 <table>
                     <tr>
@@ -343,7 +391,7 @@ th {
                     </tr>
                 </table>
             </section>
-            <section class="section">
+            <section class="section" id="cfg-ports" style="display:none">
                 <div class="section-title">서비스 포트 (재부팅 후 적용)</div>
                 <table style="width:auto; margin:0">
                     <tr>
@@ -358,7 +406,7 @@ th {
                     </tr>
                 </table>
             </section>
-            <section class="section">
+            <section class="section" id="cfg-webip" style="display:none">
                 <div class="section-title">WEB 접근 허용 IP (0.0.0.0=전체허용)</div>
                 <table>
                     <tr>
@@ -369,7 +417,7 @@ th {
                     </tr>
                 </table>
             </section>
-            <section class="section">
+            <section class="section" id="cfg-session" style="display:none">
                 <div class="section-title">HTTPS 세션 유효시간</div>
                 <table>
                     <tr>
@@ -379,6 +427,8 @@ th {
                     </tr>
                 </table>
             </section>
+            <div id="cfg-serial" style="display:none">
+
             <section class="section">
                 <div class="section-title">시리얼 설정 — RS-232 (uart1) (재부팅 후 적용)</div>
                 <table style="width:auto; margin:0">
@@ -493,8 +543,10 @@ th {
                 </div>
             </section>
 
+            </div><!-- /cfg-serial -->
+
             <!-- 계정 관리 -->
-            <section class="section">
+            <section class="section" id="cfg-acc" style="display:none">
                 <div class="section-title">계정 관리</div>
                 <table id="acc-table">
                     <tr><th>사용자 ID</th><th style="width:100px">삭제</th></tr>
@@ -544,6 +596,9 @@ th {
                     </div>
                 </div>
             </section>
+
+                </div><!-- /cfg-panels -->
+            </div><!-- /cfg-layout -->
         </div>
     </main>
 </div>
@@ -608,6 +663,17 @@ function poll(){
 setInterval(poll,3000);
 poll();
 
+var CFG_PANELS=['cfg-net','cfg-snmpip','cfg-trapip','cfg-ports','cfg-webip',
+               'cfg-session','cfg-serial','cfg-acc'];
+function showCfg(id){
+    for(var i=0;i<CFG_PANELS.length;i++){
+        var pid=CFG_PANELS[i];
+        var panel=document.getElementById(pid);
+        if(panel) panel.style.display=(pid===id)?'':'none';
+        var btn=document.getElementById('nav-'+pid);
+        if(btn) btn.className=(pid===id)?'active':'';
+    }
+}
 function showTab(tab){
     if(tab==='config'){
         document.getElementById('pass-modal').classList.add('show');
