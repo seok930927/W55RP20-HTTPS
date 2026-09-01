@@ -23,9 +23,10 @@
 #define SAVE_INTERVAL_MS            1000
 
 #if (DEVICE_BOARD_NAME == PLATYPUS_S2E)
-#define MAC_OUI0  0xEC
-#define MAC_OUI1  0x74
-#define MAC_OUI2  0xCD
+/* flsystem OUI (IEEE MA-S): 8C:1F:64:4E:Bx — 기입 시작 주소 8C:1F:64:4E:B2:00 */
+#define MAC_OUI0  0x8C
+#define MAC_OUI1  0x1F
+#define MAC_OUI2  0x64
 #else
 #define MAC_OUI0  0x00
 #define MAC_OUI1  0x08

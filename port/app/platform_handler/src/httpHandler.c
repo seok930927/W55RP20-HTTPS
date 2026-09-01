@@ -595,12 +595,12 @@ static int https_handle_config_post(wiz_tls_context *tls_ctx, const char *body) 
         } sfields[] = {
             { "\"serial_baud\":",   &conf->serial_option.baud_rate,    19 },
             { "\"serial_data\":",   &conf->serial_option.data_bits,    2  },
-            { "\"serial_parity\":", &conf->serial_option.parity,       2  },
+            { "\"serial_parity\":", &conf->serial_option.parity,       4  },
             { "\"serial_flow\":",   &conf->serial_option.flow_control, 4  },
             { "\"serial_mode\":",   &conf->serial_option.protocol,     2  },
             { "\"serial485_baud\":",   &conf->serial_option_485.baud_rate,    19 },
             { "\"serial485_data\":",   &conf->serial_option_485.data_bits,    2  },
-            { "\"serial485_parity\":", &conf->serial_option_485.parity,       2  },
+            { "\"serial485_parity\":", &conf->serial_option_485.parity,       4  },
             { "\"serial485_flow\":",   &conf->serial_option_485.flow_control, 4  },
             { "\"serial485_mode\":",   &conf->serial_option_485.protocol,     2  },
         };

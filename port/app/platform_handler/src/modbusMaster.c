@@ -56,20 +56,13 @@ void modbusMaster_init(void) {
 
     uint8_t dbits = (opt->data_bits == word_len7) ? 7 : 8;
     uint8_t sbits = (opt->stop_bits == stop_bit2) ? 2 : 1;
-    uart_parity_t par = UART_PARITY_NONE;
-    if (opt->parity == parity_odd) {
-        par = UART_PARITY_ODD;
-    }
-    if (opt->parity == parity_even) {
-        par = UART_PARITY_EVEN;
-    }
-    uart_set_format(uart1, dbits, sbits, par);
+    uart_set_format_parity(uart1, dbits, sbits, opt->parity);
     uart_set_hw_flow(uart1, false, false);
     uart_set_fifo_enabled(uart1, true);
 
-    PRT_INFO("modbusMaster: RS-232 master ready (uart1, %lu-%u-%c-%u)\r\n",
+    PRT_INFO("modbusMaster: RS-232 master ready (uart1, %lu-%u-%s-%u)\r\n",
              (unsigned long)baud, dbits,
-             (par == UART_PARITY_NONE) ? 'N' : (par == UART_PARITY_ODD ? 'O' : 'E'),
+             parity_table[opt->parity <= parity_mark ? opt->parity : parity_none],
              sbits);
 }
 

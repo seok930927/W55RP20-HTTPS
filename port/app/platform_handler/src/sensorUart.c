@@ -112,16 +112,8 @@ static void init_rs485_uart(void) {
     /* Stop bits */
     uint8_t sbits = (opt->stop_bits == stop_bit2) ? 2 : 1;
 
-    /* Parity */
-    uart_parity_t par = UART_PARITY_NONE;
-    if (opt->parity == parity_odd) {
-        par = UART_PARITY_ODD;
-    }
-    if (opt->parity == parity_even) {
-        par = UART_PARITY_EVEN;
-    }
-
-    uart_set_format(uart0, dbits, sbits, par);
+    /* Parity — includes space/mark (PL011 stick parity) */
+    uart_set_format_parity(uart0, dbits, sbits, opt->parity);
     uart_set_hw_flow(uart0, false, false);
     uart_set_fifo_enabled(uart0, true);
 

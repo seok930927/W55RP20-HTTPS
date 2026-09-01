@@ -131,6 +131,8 @@ typedef enum {SEGCP_MC, SEGCP_VR, SEGCP_MN, SEGCP_IM, SEGCP_OP, SEGCP_DD, SEGCP_
 #define SEGCP_NONE      parity_none
 #define SEGCP_ODD       parity_odd
 #define SEGCP_EVEN      parity_even
+#define SEGCP_SPACE     parity_space
+#define SEGCP_MARK      parity_mark
 
 #define SEGCP_STBIT1    stop_bit1
 #define SEGCP_STBIT2    stop_bit2

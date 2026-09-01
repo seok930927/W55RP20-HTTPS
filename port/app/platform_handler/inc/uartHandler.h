@@ -81,7 +81,9 @@ enum stop_bit {
 enum parity {
     parity_none = 0,
     parity_odd = 1,
-    parity_even = 2
+    parity_even = 2,
+    parity_space = 3,   // stick parity, bit always 0
+    parity_mark = 4     // stick parity, bit always 1
 };
 
 enum flow_ctrl {
@@ -104,6 +106,11 @@ extern uint8_t stop_bit_table[];
 extern uint8_t * parity_table[];
 extern uint8_t * flow_ctrl_table[];
 extern uint8_t * uart_if_table[];
+
+/*  Set data/stop/parity on `uart`. Unlike pico-sdk's uart_set_format(), this
+    handles parity_space / parity_mark via the PL011 stick-parity bit.
+    `parity_sel` is an `enum parity` value, not a uart_parity_t. */
+void uart_set_format_parity(uart_inst_t *uart, uint8_t data_bits, uint8_t stop_bits, uint8_t parity_sel);
 
 void on_uart_rx(void);
 void DEBUG_UART_Configuration(void);

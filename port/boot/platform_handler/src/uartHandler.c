@@ -30,7 +30,7 @@ uint8_t flag_ringbuf_full = 0;
 
 uint32_t baud_table[] = {300, 600, 1200, 1800, 2400, 4800, 9600, 14400, 19200, 28800, 38400, 57600, 115200, 230400, 460800};
 uint8_t word_len_table[] = {7, 8, 9};
-uint8_t * parity_table[] = {(uint8_t *)"N", (uint8_t *)"ODD", (uint8_t *)"EVEN"};
+uint8_t * parity_table[] = {(uint8_t *)"N", (uint8_t *)"ODD", (uint8_t *)"EVEN", (uint8_t *)"SPACE", (uint8_t *)"MARK"};
 uint8_t stop_bit_table[] = {1, 2};
 uint8_t * flow_ctrl_table[] = {(uint8_t *)"NONE", (uint8_t *)"XON/XOFF", (uint8_t *)"RTS/CTS", (uint8_t *)"RTS Only", (uint8_t *)"RTS Only Reverse"};
 uint8_t * uart_if_table[] = {(uint8_t *)UART_IF_STR_TTL, (uint8_t *)UART_IF_STR_RS232, (uint8_t *)UART_IF_STR_RS422, (uint8_t *)UART_IF_STR_RS485, (uint8_t *)UART_IF_STR_RS485};
@@ -84,6 +84,50 @@ void on_uart_rx(void) {
             flag_ringbuf_full = ON;
         }
         init_time_delimiter_timer();
+    }
+}
+
+/*  Apply data/stop/parity, including the space/mark modes.
+
+    pico-sdk's uart_set_format() only knows none/even/odd — space and mark need
+    the PL011 stick-parity bit (LCR_H.SPS, bit 7), which it neither sets nor
+    clears (SPS is absent from its write mask), so SPS survives across calls and
+    we have to drive it explicitly both ways:
+
+        space  PEN=1, EPS=1, SPS=1   parity bit always 0
+        mark   PEN=1, EPS=0, SPS=1   parity bit always 1
+
+    SPS must be patched in *after* uart_set_format(), which supplies PEN/EPS. */
+void uart_set_format_parity(uart_inst_t *uart, uint8_t data_bits, uint8_t stop_bits, uint8_t parity_sel) {
+    uart_parity_t par;
+    uint8_t stick = 0;
+
+    switch (parity_sel) {
+    case parity_odd:
+        par = UART_PARITY_ODD;
+        break;
+    case parity_even:
+        par = UART_PARITY_EVEN;
+        break;
+    case parity_space:
+        par = UART_PARITY_EVEN;
+        stick = 1;
+        break;
+    case parity_mark:
+        par = UART_PARITY_ODD;
+        stick = 1;
+        break;
+    default:
+        par = UART_PARITY_NONE;
+        break;
+    }
+
+    uart_set_format(uart, data_bits, stop_bits, par);
+
+    if (stick) {
+        hw_set_bits(&uart_get_hw(uart)->lcr_h, UART_UARTLCR_H_SPS_BITS);
+    } else {
+        hw_clear_bits(&uart_get_hw(uart)->lcr_h, UART_UARTLCR_H_SPS_BITS);
     }
 }
 
@@ -150,22 +194,12 @@ void DATA0_UART_Configuration(void) {
         break;
     }
 
-    /* Set Parity Bits */
-    switch (serial_option->parity) {
-    case parity_none:
-        temp_parity = UART_PARITY_NONE;
-        break;
-    case parity_odd:
-        temp_parity = UART_PARITY_ODD;
-        break;
-    case parity_even:
-        temp_parity = UART_PARITY_EVEN;
-        break;
-    default:
-        temp_parity = UART_PARITY_NONE;
+    /* Set Parity Bits — uart_set_format_parity() maps the enum, including the
+       space/mark stick-parity modes. Only the range check lives here. */
+    if (serial_option->parity > parity_mark) {
         serial_option->parity = parity_none;
-        break;
     }
+    temp_parity = serial_option->parity;
 
     /* Flow Control */
     if ((serial_option->uart_interface == UART_IF_TTL) || (serial_option->uart_interface == UART_IF_RS232)) {
@@ -214,7 +248,7 @@ void DATA0_UART_Configuration(void) {
 #endif
 
     // Set our data format
-    uart_set_format(UART_ID, temp_data_bits, temp_stop_bits, temp_parity);
+    uart_set_format_parity(UART_ID, temp_data_bits, temp_stop_bits, temp_parity);
 
     // Turn off FIFO's - we want to do this character by character
     uart_set_fifo_enabled(UART_ID, false);

@@ -855,7 +855,7 @@ uint16_t proc_SEGCP(uint8_t* segcp_req, uint8_t* segcp_rep, uint8_t segcp_privil
                     break;
                 case SEGCP_PR:
                     tmp_byte = is_hex(*param);
-                    if (param_len != 1 || tmp_byte > parity_even) {
+                    if (param_len != 1 || tmp_byte > parity_mark) {
                         ret |= SEGCP_RET_ERR_INVALIDPARAM;
                     } else {
                         dev_config->serial_option.parity = tmp_byte;

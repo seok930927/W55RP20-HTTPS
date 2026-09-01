@@ -69,12 +69,12 @@ void set_DevConfig_to_factory_value(void) {
 
     dev_config.network_common.local_ip[0] = 192;
     dev_config.network_common.local_ip[1] = 168;
-    dev_config.network_common.local_ip[2] = 11;
-    dev_config.network_common.local_ip[3] = 2;
+    dev_config.network_common.local_ip[2] = 0;
+    dev_config.network_common.local_ip[3] = 200;
 
     dev_config.network_common.gateway[0] = 192;
     dev_config.network_common.gateway[1] = 168;
-    dev_config.network_common.gateway[2] = 11;
+    dev_config.network_common.gateway[2] = 0;
     dev_config.network_common.gateway[3] = 1;
 
     dev_config.network_common.subnet[0] = 255;
