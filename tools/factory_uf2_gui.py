@@ -4,7 +4,14 @@ factory_uf2_gui.py - Embed a MAC address into a W55RP20 UF2/HEX image.
 
   HEX  input  → HEX  output
   UF2  input  → UF2  output
-  MAC only    → HEX  or UF2  (user choice)
+  MAC only    → HEX, UF2 or BIN  (user choice)
+
+BIN 은 주소 정보가 없는 raw 이미지라 MAC only 모드에서만 지원한다.
+생성된 BIN 은 파일 오프셋 0 이 MAC 첫 바이트이며, 구울 때 0x10124000
+오프셋을 지정하면 MAC 섹터 하나만 갱신되고 DevConfig(0x120000) 와
+인증서(0x121000~0x123000) 는 보존된다.
+
+  picotool load MAC_XXXXXXXXXXXX.bin -o 0x10124000
 """
 
 import struct
@@ -18,6 +25,7 @@ UF2_MAGIC_START1 = 0x9E5D5157
 UF2_MAGIC_END    = 0x0AB16F30
 RP2040_FAMILY_ID = 0xE48BFF56
 FLASH_MAC_XIP    = 0x10124000   # XIP absolute address
+FLASH_MAC_OFFSET = 0x00124000   # flash-relative offset (XIP_BASE 제외)
 BLOCK_BYTES      = 512
 DATA_BYTES       = 256
 
@@ -162,6 +170,25 @@ def embed_mac_uf2(input_path, mac: bytes, output_path: str) -> int:
         for blk in fw:
             f.write(blk)
     return len(fw)
+
+
+# ════════════════════════════════════════════════════════
+#  BIN  (MAC only 전용)
+# ════════════════════════════════════════════════════════
+
+def mac_only_bin(mac: bytes, output_path: str) -> None:
+    """MAC 6바이트 + 0xFF 패딩 1페이지(256B) BIN 파일 생성.
+
+    UF2 MAC 블록과 동일한 페이로드다. 파일 오프셋 0 이 MAC 첫 바이트이므로
+    플래싱 툴에 0x10124000 을 지정해야 올바른 위치에 기록된다.
+    """
+    with open(output_path, "wb") as f:
+        f.write(mac + b"\xff" * (DATA_BYTES - len(mac)))
+
+
+def bin_flash_hint(filename: str) -> str:
+    return (f"picotool load {filename} -o 0x{FLASH_MAC_XIP:08X}\n"
+            f"(SWD 사용 시 flash offset 0x{FLASH_MAC_OFFSET:06X})")
 
 
 # ════════════════════════════════════════════════════════
