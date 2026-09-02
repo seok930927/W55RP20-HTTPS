@@ -244,6 +244,14 @@ void set_DevConfig_ext_to_factory_value(void) {
     dev_config.serial485_intf_sel = UART_IF_RS485;
     dev_config.serial485_de_pin = RS485_UART_DE_PIN;
 
+    /* SNMP access control — permissive defaults (match empty/0 on existing units) */
+    memset(dev_config.snmp_community, 0x00, sizeof(dev_config.snmp_community));
+    memcpy(dev_config.snmp_community, SNMP_COMMUNITY_DEFAULT, sizeof(SNMP_COMMUNITY_DEFAULT));
+    memset(dev_config.trap_community, 0x00, sizeof(dev_config.trap_community));
+    memcpy(dev_config.trap_community, SNMP_COMMUNITY_DEFAULT, sizeof(SNMP_COMMUNITY_DEFAULT));
+    dev_config.snmp_perm = SNMP_PERM_RW;
+    dev_config.trap_disable = 0;   /* traps enabled */
+
     memset(dev_config.reserved_ext, 0x00, sizeof(dev_config.reserved_ext));
 }
 

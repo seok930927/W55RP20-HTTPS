@@ -54,6 +54,11 @@ static void snmp_agent_init(void) {
     uint16_t agent_port = conf->snmp_agent_port ? conf->snmp_agent_port : SNMP_AGENT_PORT_DEFAULT;
     snmp_set_allowed_ips((const uint8_t (*)[4])conf->snmp_option.allowed_ip);  /* 4 slots */
     snmp_set_agent_port(agent_port);
+    /*  Access control (community / permission / trap community) — injected here so
+        the SNMP core never depends on DevConfig. Empty strings resolve to "public". */
+    snmp_set_community(conf->snmp_community);
+    snmp_set_permission(conf->snmp_perm);
+    snmp_set_trap_community(conf->trap_community);
     snmpd_init(NULL, snmp_agent_ip, SOCK_SNMP_AGENT, SOCK_SNMP_TRAP);
     snmp_initialized = TRUE;
 
@@ -84,6 +89,14 @@ void snmp_notify_device(uint8_t dev) {
     value column of each queued device. */
 static void snmp_flush_traps(void) {
     DevConfig *conf = get_DevConfig_pointer();
+
+    /* Trap Accept = NO: drain the queue without sending (keeps producers happy). */
+    if (conf->trap_disable) {
+        taskENTER_CRITICAL();
+        snmp_trap_q_tail = snmp_trap_q_head;
+        taskEXIT_CRITICAL();
+        return;
+    }
 
     while (snmp_trap_q_tail != snmp_trap_q_head) {
         taskENTER_CRITICAL();

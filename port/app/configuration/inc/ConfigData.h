@@ -187,6 +187,11 @@ struct __mqtt_option {
 /* SNMP option lives in the extension section */
 #define SNMP_ALLOWED_IP_CNT   4
 #define SNMP_TRAP_IP_CNT      4
+/* SNMP access control (community strings + permission), extension section. */
+#define SNMP_COMMUNITY_SIZE      16
+#define SNMP_COMMUNITY_DEFAULT   "public"
+/* snmp_perm values — 0 is the permissive default so existing units are unaffected. */
+enum snmp_perm { SNMP_PERM_RW = 0, SNMP_PERM_RO = 1, SNMP_PERM_NONE = 2 };
 struct __snmp_option {
     uint8_t allowed_ip[SNMP_ALLOWED_IP_CNT][4];
     uint8_t trap_ip[SNMP_TRAP_IP_CNT][4];
@@ -204,11 +209,12 @@ struct __snmp_option {
 #define DEVCONFIG_RESERVED_LEGACY_SIZE  64
 /*  reserved_ext shrinks as named ext fields are added, keeping sizeof(DevConfig)
     constant so existing flash blobs stay layout-compatible.
-    86 = 128 - https_session_timeout_min(2) - snmp_option slot growth(16)
+    52 = 128 - https_session_timeout_min(2) - snmp_option slot growth(16)
              - sizeof(struct __serial_option)(9) - https_port(2) - snmp_agent_port(2)
              - web_access_ip(8) - serial_intf_sel(1) - serial485_intf_sel(1)
-             - serial485_de_pin(1). */
-#define DEVCONFIG_RESERVED_EXT_SIZE    86
+             - serial485_de_pin(1) - snmp_community(16) - trap_community(16)
+             - snmp_perm(1) - trap_disable(1). */
+#define DEVCONFIG_RESERVED_EXT_SIZE    52
 
 /* Service port defaults / bounds (0 stored => use default at runtime). */
 #define HTTPS_PORT_DEFAULT        443
@@ -265,6 +271,16 @@ typedef struct __DevConfig {
         GPIO0 is the UART TX pin so it can never be DE, making 0 a safe sentinel.
         Lets the FW run on boards that route DE to a different pin. */
     uint8_t  serial485_de_pin;
+    /*  ── SNMP access control (extension section) ──
+        All four are chosen so an existing unit (reserved_ext == 0) keeps the
+        pre-feature behaviour without a version bump:
+          - community strings: empty (first byte 0) => "public"
+          - snmp_perm: 0 => read-write (full access, = old behaviour)
+          - trap_disable: 0 => traps enabled (= old behaviour) */
+    char     snmp_community[SNMP_COMMUNITY_SIZE];   /* get/set community; "" => public */
+    char     trap_community[SNMP_COMMUNITY_SIZE];   /* trap community;    "" => public */
+    uint8_t  snmp_perm;        /* enum snmp_perm: 0 R/W, 1 R/O, 2 no-access */
+    uint8_t  trap_disable;     /* 0 = traps enabled (default), 1 = disabled */
     uint8_t reserved_ext[DEVCONFIG_RESERVED_EXT_SIZE];
 } __attribute__((packed)) DevConfig;
 

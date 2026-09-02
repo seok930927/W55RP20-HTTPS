@@ -5,138 +5,142 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>W55RP20 Status</title>
 <style>
+/*  flsystem 제품 화면 스타일 — 좌측 세로 메뉴 + 컬러 타이틀바 + 격자 테이블 */
 body {
     margin: 0;
-    background: #e6e6e6;
-    color: #222;
-    font-family: "Malgun Gothic", Arial, sans-serif;
+    background: #ffffff;
+    color: #1a1a1a;
+    font-family: "돋움", Dotum, "Malgun Gothic", Arial, sans-serif;
+    font-size: 13px;
 }
 .page {
     display: flex;
-    flex-direction: column;
-    gap: 12px;
-    max-width: 1200px;
-    margin: 12px auto;
-    padding: 0 12px 12px;
+    flex-direction: row;
+    align-items: stretch;
+    max-width: 1000px;
+    margin: 14px auto;
     box-sizing: border-box;
 }
+/* ── 좌측 세로 메뉴 (기존 제품 스타일: 회색 박스) ── */
 .topnav {
-    background: #f3f3f3;
-    border: 1px solid #8ea0ad;
+    flex: 0 0 150px;
+    background: #d9d9d9;
+    border: 1px solid #a0a0a0;
+    align-self: flex-start;
+    margin-right: 12px;
+    min-height: 150px;
 }
-.menu {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: row;
-}
+.menu { list-style: none; margin: 0; padding: 8px 0; }
 .menu li {
-    flex: 1;
-    padding: 14px 18px;
-    border-right: 1px solid #cdd6dc;
-    font-size: 22px;
+    padding: 4px 8px 4px 12px;
+    font-size: 13px;
     font-weight: bold;
-    color: #4a4a4a;
+    color: #222;
     cursor: pointer;
-    text-align: center;
+    white-space: nowrap;
 }
-.menu li:last-child {
-    border-right: none;
+.menu li:hover { color: #000; text-decoration: underline; }
+.menu li.active { color: #000; }
+/* 서브 항목(현재상태 하위) */
+.menu li.sub {
+    padding-left: 24px;
+    font-weight: normal;
+    font-size: 12px;
+    color: #333;
 }
-.menu li:hover {
-    background: #e8f0f7;
-}
-.menu li.active {
-    background: #d6e6f4;
-    color: #0e4b78;
-}
+.menu li.sub::before { content: "○ "; color: #666; }
+.menu li.sub.active { font-weight: bold; color: #000; }
+.menu li.sub.active::before { content: "● "; color: #000; }
+/* ── 본문 ── */
 .content {
     flex: 1;
-    border: 3px solid #0f5b87;
-    background: #f9f9f9;
+    min-width: 0;
+    border: 1px solid #3a6ea5;
+    background: #ffffff;
 }
 .content-header {
-    padding: 10px 18px;
-    background: #0f5b87;
+    padding: 5px 12px;
+    background: #3a6ea5;
     color: #fff;
-    font-size: 30px;
+    font-size: 14px;
     font-weight: bold;
 }
 .section {
-    margin: 18px;
-    border: 1px solid #7e8d98;
-    background: #ececec;
+    margin: 12px;
+    border: 1px solid #9aa7b1;
+    background: #ffffff;
 }
 .section-title {
-    padding: 8px 12px;
-    border-bottom: 1px solid #7e8d98;
+    padding: 4px 8px;
+    background: #e8e8e8;
+    border-bottom: 1px solid #b0b0b0;
     text-align: center;
-    font-size: 28px;
+    font-size: 12px;
     font-weight: bold;
+    color: #222;
 }
 table {
-    width: calc(100% - 20px);
-    margin: 10px;
-    border-collapse: separate;
-    border-spacing: 4px;
+    width: calc(100% - 16px);
+    margin: 8px;
+    border-collapse: collapse;
 }
 th, td {
-    border: 1px solid #7e7e7e;
-    background: #fafafa;
+    border: 1px solid #c8c8c8;
+    background: #ffffff;
     text-align: center;
-    padding: 8px 6px;
-    font-size: 24px;
+    padding: 3px 6px;
+    font-size: 12px;
 }
 th {
-    background: #f0f0f0;
+    background: #ffffff;
+    color: #222;
+    font-weight: normal;
 }
-/* 3-up sensor grid table — smaller cells to fit 9 columns */
+/* 3-up sensor grid table */
 .sensor-table th, .sensor-table td {
-    font-size: 18px;
-    padding: 6px 4px;
+    font-size: 12px;
+    padding: 4px 4px;
 }
 .sensor-table .col-idx {
-    width: 50px;
+    width: 44px;
     color: #777;
 }
 .footer {
-    padding: 10px 16px 18px;
+    padding: 8px 12px 12px;
     text-align: center;
-    font-size: 22px;
-    font-weight: bold;
+    font-size: 12px;
+    color: #444;
+    border-top: 1px solid #cfd8df;
 }
 .btn-save {
-    font-size: 22px;
-    padding: 8px 28px;
-    background: #0f5b87;
-    color: #fff;
-    border: none;
+    font-size: 12px;
+    padding: 2px 14px;
+    background: #ececec;
+    color: #222;
+    border: 1px solid #888;
     cursor: pointer;
-    border-radius: 4px;
 }
-.btn-save:hover { background: #0a3f60; }
+.btn-save:hover { background: #dcdcdc; }
 .btn-del {
-    font-size: 18px;
-    padding: 4px 14px;
+    font-size: 12px;
+    padding: 3px 10px;
     background: #cc2200;
     color: #fff;
     border: none;
     cursor: pointer;
-    border-radius: 3px;
 }
 .btn-del:hover { background: #991a00; }
 .ip-input {
-    font-size: 24px;
-    width: 200px;
-    padding: 4px 8px;
-    border: 1px solid #7e8d98;
-    text-align: center;
+    font-size: 12px;
+    width: 130px;
+    padding: 1px 4px;
+    border: 1px solid #999;
+    text-align: left;
 }
 .pw-hint {
-    font-size: 16px;
+    font-size: 11px;
     color: #6b7a85;
-    margin-left: 10px;
+    margin-left: 8px;
     white-space: nowrap;
 }
 /* Modal */
@@ -202,41 +206,41 @@ th {
 .cfg-layout {
     display: flex;
     align-items: flex-start;
-    margin: 18px;
+    margin: 12px;
 }
 .cfg-nav {
-    flex: 0 0 230px;
-    border: 1px solid #7e8d98;
-    background: #ececec;
+    flex: 0 0 130px;
+    border: 1px solid #9aa7b1;
+    background: #f2f5f7;
     box-sizing: border-box;
 }
 .cfg-nav ul { list-style: none; margin: 0; padding: 0; }
 .cfg-nav li {
-    padding: 14px 16px;
-    border-bottom: 1px solid #cdd6dc;
-    font-size: 20px;
+    padding: 7px 10px;
+    border-bottom: 1px solid #d3dbe1;
+    font-size: 13px;
     font-weight: bold;
-    color: #4a4a4a;
+    color: #33475a;
     cursor: pointer;
 }
 .cfg-nav li:last-child { border-bottom: none; }
-.cfg-nav li:hover { background: #e8f0f7; }
-.cfg-nav li.active { background: #0f5b87; color: #fff; }
+.cfg-nav li:hover { background: #e2eaf1; }
+.cfg-nav li.active { background: #204d7a; color: #fff; }
 .cfg-panels { flex: 1; min-width: 0; }
-.cfg-panels .section { margin: 0 0 0 18px; }
-.cfg-panels .section + .section { margin-top: 18px; }
-@media (max-width: 900px) {
-    .menu { flex-direction: column; }
-    .menu li { border-right: none; border-bottom: 1px solid #cdd6dc; }
-    .menu li:last-child { border-bottom: none; }
-    .menu li, .content-header, .section-title, th, td, .footer { font-size: 16px; }
-    .sensor-table th, .sensor-table td { font-size: 14px; padding: 4px 2px; }
-    .cfg-layout { flex-direction: column; margin: 12px; }
+.cfg-panels .section { margin: 0 0 0 12px; }
+.cfg-panels .section + .section { margin-top: 12px; }
+@media (max-width: 560px) {
+    .page { flex-direction: column; margin: 8px; }
+    .topnav { flex: none; width: 100%; border-bottom: 1px solid #9aa7b1; }
+    .menu { display: flex; flex-wrap: wrap; }
+    .menu li { padding: 6px 12px; }
+    .menu li.sub { padding-left: 18px; }
+    .cfg-layout { flex-direction: column; }
     .cfg-nav { flex: none; width: 100%; }
     .cfg-nav ul { display: flex; flex-wrap: wrap; }
-    .cfg-nav li { flex: 1 1 45%; font-size: 14px; padding: 8px 10px; }
+    .cfg-nav li { flex: 1 1 45%; }
     .cfg-panels { width: 100%; }
-    .cfg-panels .section { margin: 12px 0 0 0; }
+    .cfg-panels .section { margin: 10px 0 0 0; }
 }
 </style>
 </head>
@@ -272,62 +276,51 @@ th {
 <div class="page">
     <nav class="topnav">
         <ul class="menu">
-            <li id="menu-sensor" class="active" onclick="showTab('sensor')">온습도및입력</li>
-            <li id="menu-config" onclick="showTab('config')">환경설정</li>
+            <li>현재상태</li>
+            <li id="menu-sensor" class="sub active" onclick="showSensor('device')">온습도및입력</li>
+            <li id="menu-comm" class="sub" onclick="showSensor('comm')">통신데이타</li>
+            <li id="menu-network" onclick="showTab('config')">네트워크환경</li>
+            <li id="menu-config" onclick="showTab('setup')">환경설정</li>
         </ul>
     </nav>
 
     <main class="content">
         <!-- 디바이스 탭 -->
         <div id="tab-sensor">
-            <div class="content-header">[ 디바이스 데이터 ]</div>
+            <!-- 온습도및입력 -->
+            <div id="view-device">
+                <div class="content-header">[ 온습도 센서 및 입출력데이터 ]</div>
+                <section class="section">
+                    <div class="section-title">활성 디바이스</div>
+                    <table class="sensor-table">
+                        <thead id="sensor-head"></thead>
+                        <tbody id="sensor-rows"></tbody>
+                    </table>
+                    <div id="sensor-empty" style="text-align:center;padding:20px;color:#888;display:none">활성 항목이 없습니다</div>
+                </section>
+                <div class="footer">에프엘시스템 &nbsp; E-mail: fms@flsystem.co.kr</div>
+            </div>
 
-            <section class="section">
-                <div class="section-title">활성 디바이스</div>
-                <table class="sensor-table">
-                    <thead id="sensor-head"></thead>
-                    <tbody id="sensor-rows"></tbody>
-                </table>
-                <div id="sensor-empty" style="text-align:center;padding:20px;color:#888;display:none">활성 항목이 없습니다</div>
-            </section>
-
-            <section class="section">
-                <div class="section-title">데이터 수신 바이트</div>
-                <table>
-                    <tr><th>통신상태</th><td id="comm_status">-</td><th>0:정상,2:이상</th><td>-</td></tr>
-                    <tr><th>수신체크섬</th><td id="recv_cs">-</td><th>계산체크섬</th><td id="calc_cs">-</td></tr>
-                    <tr><th>통신체크</th><td id="comm_check">-</td><th>통신플래그</th><td id="comm_flag">-</td></tr>
-                </table>
-            </section>
-
-            <div class="footer">기본 화면 골격만 적용된 상태입니다.</div>
+            <!-- 통신데이타 -->
+            <div id="view-comm" style="display:none">
+                <div class="content-header">[ 온습도 센서 통신데이타 ]</div>
+                <section class="section">
+                    <div class="section-title">데이터 수신 바이트</div>
+                    <table>
+                        <tr><th>통신상태</th><td id="comm_status">-</td><th>0:정상,2:이상</th><td>-</td></tr>
+                        <tr><th>수신체크섬</th><td id="recv_cs">-</td><th>계산체크섬</th><td id="calc_cs">-</td></tr>
+                        <tr><th>통신체크</th><td id="comm_check">-</td><th>통신플래그</th><td id="comm_flag">-</td></tr>
+                    </table>
+                </section>
+                <div class="footer">에프엘시스템 &nbsp; E-mail: fms@flsystem.co.kr</div>
+            </div>
         </div>
 
         <!-- 환경설정 탭 -->
         <div id="tab-config" style="display:none">
-            <div class="content-header">[ 환경설정 ]</div>
+            <div class="content-header">[ 네트워크 환경설정 ]</div>
 
-            <div style="text-align:center; padding:10px 0 4px">
-                <button class="btn-save" onclick="saveConfig()">환경설정 전체 저장</button>
-                <span class="save-status" style="font-size:20px; margin-left:14px; color:#0f5b87"></span>
-            </div>
-
-            <div class="cfg-layout">
-                <nav class="cfg-nav">
-                    <ul>
-                        <li id="nav-cfg-net" class="active" onclick="showCfg('cfg-net')">네트워크</li>
-                        <li id="nav-cfg-snmpip" onclick="showCfg('cfg-snmpip')">SNMP 허용 IP</li>
-                        <li id="nav-cfg-trapip" onclick="showCfg('cfg-trapip')">SNMP 트랩 IP</li>
-                        <li id="nav-cfg-ports" onclick="showCfg('cfg-ports')">서비스 포트</li>
-                        <li id="nav-cfg-webip" onclick="showCfg('cfg-webip')">WEB 허용 IP</li>
-                        <li id="nav-cfg-session" onclick="showCfg('cfg-session')">세션 유효시간</li>
-                        <li id="nav-cfg-serial" onclick="showCfg('cfg-serial')">시리얼 설정</li>
-                        <li id="nav-cfg-acc" onclick="showCfg('cfg-acc')">계정 관리</li>
-                    </ul>
-                </nav>
-                <div class="cfg-panels">
-
-            <section class="section" id="cfg-net">
+            <section class="section">
                 <div class="section-title">네트워크 설정 (재부팅 후 적용)</div>
                 <table style="width:auto; margin:0">
                     <tr>
@@ -357,8 +350,23 @@ th {
                     </tr>
                 </table>
             </section>
-            <section class="section" id="cfg-snmpip" style="display:none">
-                <div class="section-title">SNMP 수신가능 IP (0.0.0.0=전체허용)</div>
+            <section class="section">
+                <div class="section-title">SNMP Access Control</div>
+                <table style="width:auto; margin:8px">
+                    <tr>
+                        <th style="width:150px">Community</th>
+                        <td><input type="text" id="snmp_community" class="ip-input" maxlength="16" placeholder="public"></td>
+                    </tr>
+                    <tr>
+                        <th>Permission</th>
+                        <td>
+                            <select id="snmp_perm" class="ip-input">
+                                <option value="0">READ WRITE</option><option value="1">READ ONLY</option><option value="2">NO ACCESS</option>
+                            </select>
+                        </td>
+                    </tr>
+                </table>
+                <div class="section-title" style="border-top:1px solid #9aa7b1">수신가능 IP (0.0.0.0 = 전체허용)</div>
                 <table>
                     <tr>
                         <th>수신가능 IP #1</th>
@@ -374,8 +382,23 @@ th {
                     </tr>
                 </table>
             </section>
-            <section class="section" id="cfg-trapip" style="display:none">
-                <div class="section-title">SNMP 트랩 수신 IP</div>
+            <section class="section">
+                <div class="section-title">Trap Access Control</div>
+                <table style="width:auto; margin:8px">
+                    <tr>
+                        <th style="width:150px">Community</th>
+                        <td><input type="text" id="trap_community" class="ip-input" maxlength="16" placeholder="public"></td>
+                    </tr>
+                    <tr>
+                        <th>Accept</th>
+                        <td>
+                            <select id="trap_accept" class="ip-input">
+                                <option value="1">YES</option><option value="0">NO</option>
+                            </select>
+                        </td>
+                    </tr>
+                </table>
+                <div class="section-title" style="border-top:1px solid #9aa7b1">트랩 수신 IP</div>
                 <table>
                     <tr>
                         <th>트랩 수신 IP #1</th>
@@ -391,7 +414,7 @@ th {
                     </tr>
                 </table>
             </section>
-            <section class="section" id="cfg-ports" style="display:none">
+            <section class="section">
                 <div class="section-title">서비스 포트 (재부팅 후 적용)</div>
                 <table style="width:auto; margin:0">
                     <tr>
@@ -406,7 +429,7 @@ th {
                     </tr>
                 </table>
             </section>
-            <section class="section" id="cfg-webip" style="display:none">
+            <section class="section">
                 <div class="section-title">WEB 접근 허용 IP (0.0.0.0=전체허용)</div>
                 <table>
                     <tr>
@@ -417,7 +440,7 @@ th {
                     </tr>
                 </table>
             </section>
-            <section class="section" id="cfg-session" style="display:none">
+            <section class="section">
                 <div class="section-title">HTTPS 세션 유효시간</div>
                 <table>
                     <tr>
@@ -427,7 +450,20 @@ th {
                     </tr>
                 </table>
             </section>
-            <div id="cfg-serial" style="display:none">
+
+            <div style="text-align:center; padding:6px 0 14px">
+                <button class="btn-save" onclick="saveConfig()">Set</button>
+                <button class="btn-save" style="background:#888;border-color:#666;margin-left:6px" onclick="loadConfig()">Reset</button>
+                <span class="save-status" style="margin-left:12px; color:#0f5b87"></span>
+            </div>
+            <div class="footer">에프엘시스템 &nbsp; Tel:031-753-6519 &nbsp; E-mail: fms@flsystem.co.kr</div>
+        </div>
+
+        <!-- 환경설정 탭 (시리얼/계정) -->
+        <div id="tab-setup" style="display:none">
+            <div class="content-header">[ 환경설정 ]</div>
+
+            <div id="cfg-serial">
 
             <section class="section">
                 <div class="section-title">시리얼 설정 — RS-232 (uart1) (재부팅 후 적용)</div>
@@ -561,16 +597,12 @@ th {
                         </td>
                     </tr>
                 </table>
-                <div style="text-align:center; padding:14px">
-                    <button class="btn-save" onclick="saveConfig()">저장</button>
-                    <span id="save_status" class="save-status" style="font-size:20px; margin-left:14px; color:#0f5b87"></span>
-                </div>
             </section>
 
             </div><!-- /cfg-serial -->
 
             <!-- 계정 관리 -->
-            <section class="section" id="cfg-acc" style="display:none">
+            <section class="section">
                 <div class="section-title">계정 관리</div>
                 <table id="acc-table">
                     <tr><th>사용자 ID</th><th style="width:100px">삭제</th></tr>
@@ -621,8 +653,12 @@ th {
                 </div>
             </section>
 
-                </div><!-- /cfg-panels -->
-            </div><!-- /cfg-layout -->
+            <div style="text-align:center; padding:6px 0 14px">
+                <button class="btn-save" onclick="saveConfig()">Set</button>
+                <button class="btn-save" style="background:#888;border-color:#666;margin-left:6px" onclick="loadConfig()">Reset</button>
+                <span class="save-status" style="margin-left:12px; color:#0f5b87"></span>
+            </div>
+            <div class="footer">에프엘시스템 &nbsp; Tel:031-753-6519 &nbsp; E-mail: fms@flsystem.co.kr</div>
         </div>
     </main>
 </div>
@@ -687,31 +723,38 @@ function poll(){
 setInterval(poll,3000);
 poll();
 
-var CFG_PANELS=['cfg-net','cfg-snmpip','cfg-trapip','cfg-ports','cfg-webip',
-               'cfg-session','cfg-serial','cfg-acc'];
-function showCfg(id){
-    for(var i=0;i<CFG_PANELS.length;i++){
-        var pid=CFG_PANELS[i];
-        var panel=document.getElementById(pid);
-        if(panel) panel.style.display=(pid===id)?'':'none';
-        var btn=document.getElementById('nav-'+pid);
-        if(btn) btn.className=(pid===id)?'active':'';
-    }
-}
+var _pendingTab=null;
 function showTab(tab){
-    if(tab==='config'){
+    /* 네트워크환경(config) / 환경설정(setup) 은 비밀번호 잠금 */
+    if(tab==='config'||tab==='setup'){
+        _pendingTab=tab;
         document.getElementById('pass-modal').classList.add('show');
         setTimeout(function(){document.getElementById('modal-pass').focus();},50);
         return;
     }
     _doShowTab(tab);
 }
+function _setMenu(active){
+    document.getElementById('menu-sensor').className='sub'+(active==='device'?' active':'');
+    document.getElementById('menu-comm').className='sub'+(active==='comm'?' active':'');
+    document.getElementById('menu-network').className=(active==='config')?'active':'';
+    document.getElementById('menu-config').className=(active==='setup')?'active':'';
+}
 function _doShowTab(tab){
-    document.getElementById('tab-sensor').style.display=(tab==='sensor')?'':'none';
+    document.getElementById('tab-sensor').style.display=(tab==='sensor'||tab==='device'||tab==='comm')?'':'none';
     document.getElementById('tab-config').style.display=(tab==='config')?'':'none';
-    document.getElementById('menu-sensor').className=(tab==='sensor')?'active':'';
-    document.getElementById('menu-config').className=(tab==='config')?'active':'';
-    if(tab==='config'){loadConfig();loadAccounts();}
+    document.getElementById('tab-setup').style.display=(tab==='setup')?'':'none';
+    if(tab==='config'){ _setMenu('config'); loadConfig(); }
+    else if(tab==='setup'){ _setMenu('setup'); loadConfig(); loadAccounts(); }
+}
+/* 현재상태 하위: 온습도및입력(device) / 통신데이타(comm) 뷰 전환 */
+function showSensor(view){
+    document.getElementById('tab-sensor').style.display='';
+    document.getElementById('tab-config').style.display='none';
+    document.getElementById('tab-setup').style.display='none';
+    document.getElementById('view-device').style.display=(view==='device')?'':'none';
+    document.getElementById('view-comm').style.display=(view==='comm')?'':'none';
+    _setMenu(view);
 }
 
 function verifyPass(){
@@ -723,7 +766,7 @@ function verifyPass(){
         if(d.ok){
             document.getElementById('pass-modal').classList.remove('show');
             document.getElementById('modal-pass').value='';
-            _doShowTab('config');
+            _doShowTab(_pendingTab||'config');
         } else {
             document.getElementById('modal-err').textContent='비밀번호가 틀렸습니다.';
             document.getElementById('modal-pass').select();
@@ -764,6 +807,10 @@ function loadConfig(){
             var se=document.getElementById(CFG_SERIAL[s]);
             if(se && d[CFG_SERIAL[s]]!=null) se.value=d[CFG_SERIAL[s]];
         }
+        if(d.snmp_community!=null) document.getElementById('snmp_community').value=d.snmp_community;
+        if(d.snmp_perm!=null) document.getElementById('snmp_perm').value=d.snmp_perm;
+        if(d.trap_community!=null) document.getElementById('trap_community').value=d.trap_community;
+        if(d.trap_accept!=null) document.getElementById('trap_accept').value=d.trap_accept;
         upd485DE();
     }).catch(function(){});
 }
@@ -805,6 +852,11 @@ function saveConfig(){
     for(var s=0;s<CFG_SERIAL.length;s++){
         vals[CFG_SERIAL[s]]=parseInt(document.getElementById(CFG_SERIAL[s]).value,10);
     }
+    /* SNMP/Trap access control */
+    vals.snmp_community=document.getElementById('snmp_community').value;
+    vals.snmp_perm=parseInt(document.getElementById('snmp_perm').value,10);
+    vals.trap_community=document.getElementById('trap_community').value;
+    vals.trap_accept=parseInt(document.getElementById('trap_accept').value,10);
     cfgStatus('저장 중...','#0f5b87');
     fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify(vals)

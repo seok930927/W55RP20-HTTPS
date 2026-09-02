@@ -1,5 +1,5 @@
 diff --git a/Internet/SNMP/snmp.c b/Internet/SNMP/snmp.c
-index b705097..d93de0a 100644
+index b705097..bdff1c7 100644
 --- a/Internet/SNMP/snmp.c
 +++ b/Internet/SNMP/snmp.c
 @@ -13,6 +13,7 @@
@@ -19,7 +19,7 @@ index b705097..d93de0a 100644
  int32_t parseRequest();
  int32_t parseCommunity();
  int32_t parseVersion();
-@@ -55,6 +58,34 @@ static uint8_t SOCK_SNMP_TRAP;
+@@ -55,6 +58,75 @@ static uint8_t SOCK_SNMP_TRAP;
  
  uint8_t packet_trap[MAX_TRAPMSG_LEN] = {0,};
  uint8_t errorStatus, errorIndex;
@@ -51,10 +51,51 @@ index b705097..d93de0a 100644
 +        }
 +    }
 +}
++
++/*  Runtime access-control state. The app layer injects these before snmpd_run();
++    the core never reaches into DevConfig. Defaults keep the pre-feature behaviour
++    (community "public", full read/write) so nothing changes until set. */
++#define SNMP_COMMUNITY_MAX   16
++static char    s_community[SNMP_COMMUNITY_MAX] = "public";
++static uint8_t s_community_len = 6;               /* strlen("public") */
++static uint8_t s_permission = SNMP_PERMISSION_RW; /* see snmp.h enum */
++
++void snmp_set_community(const char *community)
++{
++    /* Empty / NULL => fall back to "public". */
++    if (community == NULL || community[0] == '\0') {
++        community = "public";
++    }
++    strncpy(s_community, community, SNMP_COMMUNITY_MAX - 1);
++    s_community[SNMP_COMMUNITY_MAX - 1] = '\0';
++    s_community_len = (uint8_t)strlen(s_community);
++}
++
++void snmp_set_permission(uint8_t perm)
++{
++    s_permission = (perm > SNMP_PERMISSION_NONE) ? SNMP_PERMISSION_RW : perm;
++}
++
++/* Trap community — separate from the agent community. "" / NULL => "public". */
++static char s_trap_community[SNMP_COMMUNITY_MAX] = "public";
++
++void snmp_set_trap_community(const char *community)
++{
++    if (community == NULL || community[0] == '\0') {
++        community = "public";
++    }
++    strncpy(s_trap_community, community, SNMP_COMMUNITY_MAX - 1);
++    s_trap_community[SNMP_COMMUNITY_MAX - 1] = '\0';
++}
++
++const char *snmp_get_trap_community(void)
++{
++    return s_trap_community;
++}
  
  
  /********************************************************************************************/
-@@ -105,12 +136,19 @@ void snmpd_init(uint8_t * managerIP, uint8_t * agentIP, uint8_t sn_agent, uint8_
+@@ -105,12 +177,19 @@ void snmpd_init(uint8_t * managerIP, uint8_t * agentIP, uint8_t sn_agent, uint8_
      SOCK_SNMP_AGENT = sn_agent;
      SOCK_SNMP_TRAP = sn_trap;
  
@@ -77,7 +118,7 @@ index b705097..d93de0a 100644
  
  /*
      // Example Codes for SNMP Trap
-@@ -150,7 +188,7 @@ int32_t snmpd_run(void)
+@@ -150,7 +229,7 @@ int32_t snmpd_run(void)
  	uint8_t svr_addr[6];
  	uint16_t  svr_port;
  
@@ -86,7 +127,7 @@ index b705097..d93de0a 100644
      
  	switch(getSn_SR(SOCK_SNMP_AGENT))
  	{
-@@ -158,6 +196,15 @@ int32_t snmpd_run(void)
+@@ -158,6 +237,15 @@ int32_t snmpd_run(void)
  			if ( (len = getSn_RX_RSR(SOCK_SNMP_AGENT)) > 0)
  			{
  				request_msg.len= recvfrom(SOCK_SNMP_AGENT, request_msg.buffer, len, svr_addr, &svr_port);
@@ -102,7 +143,7 @@ index b705097..d93de0a 100644
  			}
  			else
  			{
-@@ -188,10 +235,10 @@ int32_t snmpd_run(void)
+@@ -188,10 +276,10 @@ int32_t snmpd_run(void)
  			break;
  
  		case SOCK_CLOSED :
@@ -115,7 +156,7 @@ index b705097..d93de0a 100644
  #endif
  			break;
  
-@@ -220,6 +267,37 @@ int32_t findEntry(uint8_t *oid, int32_t len)
+@@ -220,6 +308,37 @@ int32_t findEntry(uint8_t *oid, int32_t len)
  }
  
  
@@ -153,7 +194,7 @@ index b705097..d93de0a 100644
  int32_t getOID(int32_t id, uint8_t *oid, uint8_t *len)
  {
  	int32_t j;
-@@ -336,7 +414,7 @@ int32_t setEntry(int32_t id, void *val, int32_t vlen, uint8_t dataType, int32_t
+@@ -336,7 +455,7 @@ int32_t setEntry(int32_t id, void *val, int32_t vlen, uint8_t dataType, int32_t
  
  	if (snmpData[id].dataType != dataType)
  	{
@@ -162,7 +203,7 @@ index b705097..d93de0a 100644
  		errorIndex = index;
  		return INVALID_DATA_TYPE;
  	}
-@@ -423,6 +501,7 @@ int32_t parseTLV(const uint8_t *msg, int32_t index, tlvStructType *tlv)
+@@ -423,6 +542,7 @@ int32_t parseTLV(const uint8_t *msg, int32_t index, tlvStructType *tlv)
  	case GET_REQUEST:
  	case GET_NEXT_REQUEST:
  	case SET_REQUEST:
@@ -170,7 +211,7 @@ index b705097..d93de0a 100644
  		tlv->nstart = tlv->vstart;
  		break;
  	default:
-@@ -483,7 +562,12 @@ int32_t parseVarBind(int32_t reqType, int32_t index)
+@@ -483,7 +603,12 @@ int32_t parseVarBind(int32_t reqType, int32_t index)
  	{
  		response_msg.buffer[response_msg.index] = request_msg.buffer[name.start];
  
@@ -184,7 +225,23 @@ index b705097..d93de0a 100644
  		{
  			id = OID_NOT_FOUND;
  			seglen = name.nstart - name.start;
-@@ -530,11 +614,24 @@ int32_t parseVarBind(int32_t reqType, int32_t index)
+@@ -523,18 +648,39 @@ int32_t parseVarBind(int32_t reqType, int32_t index)
+ 		}
+ 		else if (reqType == SET_REQUEST)
+ 		{
+-			setEntry(id, &request_msg.buffer[value.vstart], value.len, request_msg.buffer[value.start], index);
++			/* Permission gate: only R/W may write. R/O and no-access reject.
++			   (parseCommunity already blocks no-access reads by community.) */
++			if (s_permission != SNMP_PERMISSION_RW) {
++				/* v1 error-status is 0..5 (readOnly=4); v2c has notWritable(17). */
++				errorStatus = (snmp_version == SNMP_V2C) ? NOT_WRITABLE : READ_ONLY;
++				errorIndex  = (uint8_t)index;
++			} else {
++				setEntry(id, &request_msg.buffer[value.vstart], value.len, request_msg.buffer[value.start], index);
++			}
+ 			seglen = value.nstart - value.start;
+ 			COPY_SEGMENT(value);
+ 		}
  	}
  	else
  	{
@@ -213,7 +270,7 @@ index b705097..d93de0a 100644
  	}
  
  	size += seglen;
-@@ -565,6 +662,136 @@ int32_t parseSequence(int32_t reqType, int32_t index)
+@@ -565,6 +711,136 @@ int32_t parseSequence(int32_t reqType, int32_t index)
  }
  
  
@@ -350,7 +407,7 @@ index b705097..d93de0a 100644
  int32_t parseSequenceOf(int32_t reqType)
  {
  	int32_t seglen;
-@@ -625,7 +852,23 @@ int32_t parseRequest()
+@@ -625,7 +901,23 @@ int32_t parseRequest()
  	size += seglen;
  	COPY_SEGMENT(errIndex);
  
@@ -375,7 +432,28 @@ index b705097..d93de0a 100644
  	if (ret == -1) return -1;
  	else size += ret;
  
-@@ -678,8 +921,9 @@ int32_t parseVersion()
+@@ -649,13 +941,18 @@ int32_t parseCommunity()
+ 
+ 	parseTLV(request_msg.buffer, request_msg.index, &community);
+ 
+-	if (!((request_msg.buffer[community.start] == SNMPDTYPE_OCTET_STRING) && (community.len == COMMUNITY_SIZE))) 
++	if (!((request_msg.buffer[community.start] == SNMPDTYPE_OCTET_STRING) && (community.len == s_community_len)))
+ 	{
+ 		return -1;
+ 	}
+ 
+-	if (!memcmp(&request_msg.buffer[community.vstart], (int8_t *)COMMUNITY, COMMUNITY_SIZE))
++	if (!memcmp(&request_msg.buffer[community.vstart], s_community, s_community_len))
+ 	{
++		/* no-access: community matches but the agent exposes nothing. Drop
++		   silently so the manager sees no reply (SET is also blocked above). */
++		if (s_permission == SNMP_PERMISSION_NONE) {
++			return -1;
++		}
+ 		seglen = community.nstart - community.start;
+ 		size += seglen;
+ 		COPY_SEGMENT(community);
+@@ -678,8 +975,9 @@ int32_t parseVersion()
  
  	size = parseTLV(request_msg.buffer, request_msg.index, &tlv);
  
@@ -387,7 +465,7 @@ index b705097..d93de0a 100644
  
  	seglen = tlv.nstart - tlv.start;
  	size += seglen;
-@@ -879,12 +1123,119 @@ int32_t snmp_sendTrap(uint8_t * managerIP, uint8_t * agentIP, int8_t* community,
+@@ -879,12 +1177,119 @@ int32_t snmp_sendTrap(uint8_t * managerIP, uint8_t * agentIP, int8_t* community,
  	{
  		socket(SOCK_SNMP_TRAP, Sn_MR_UDP, PORT_SNMP_TRAP, 0);
  		sendto(SOCK_SNMP_TRAP, packet_trap, packet_index, managerIP, PORT_SNMP_TRAP);
@@ -509,7 +587,7 @@ index b705097..d93de0a 100644
  void dumpCode(uint8_t* header, uint8_t* tail, uint8_t *buff, int32_t len)
  {
 diff --git a/Internet/SNMP/snmp.h b/Internet/SNMP/snmp.h
-index 02c83fd..ea9ac4a 100644
+index 02c83fd..b8fa832 100644
 --- a/Internet/SNMP/snmp.h
 +++ b/Internet/SNMP/snmp.h
 @@ -12,10 +12,11 @@ extern "C" {
@@ -525,11 +603,14 @@ index 02c83fd..ea9ac4a 100644
  #define MAX_TRAPMSG_LEN				512
  
  // SNMP Error code
-@@ -29,16 +30,29 @@ extern "C" {
+@@ -28,17 +29,31 @@ extern "C" {
+ 
  #define NO_SUCH_NAME				2
  #define BAD_VALUE					3
- 
+-
 -// SNMPv1 Commands
++#define READ_ONLY					4    /* SNMPv1 error-status readOnly (RFC 1157) */
++
 +// SNMPv2c Error codes
 +#define NO_ACCESS					6
 +#define WRONG_TYPE					7
@@ -559,7 +640,7 @@ index 02c83fd..ea9ac4a 100644
  #define SNMPDTYPE_INTEGER			0x02
  #define SNMPDTYPE_OCTET_STRING		0x04
  #define SNMPDTYPE_NULL_ITEM			0x05
-@@ -50,6 +64,12 @@ extern "C" {
+@@ -50,6 +65,12 @@ extern "C" {
  #define SNMPDTYPE_GAUGE  			0x42
  #define SNMPDTYPE_TIME_TICKS		0x43
  #define SNMPDTYPE_OPAQUE			0x44
@@ -572,12 +653,24 @@ index 02c83fd..ea9ac4a 100644
  
  // SNMP Trap: Standard Trap Types (Generic)
  #define SNMPTRAP_COLDSTART			0x00	// Generic trap-type 0: Cold Start
-@@ -107,8 +127,11 @@ typedef struct {
+@@ -107,8 +128,23 @@ typedef struct {
  /********************************************************************************************/
  // SNMP Main functions
  void snmpd_init(uint8_t * managerIP, uint8_t * agentIP, uint8_t sn_agent, uint8_t sn_trap);
 +void snmp_set_allowed_ips(const uint8_t allowed[4][4]);
 +void snmp_set_agent_port(uint16_t port);
++
++/* Access-control permission levels (match enum snmp_perm in the app layer). */
++#define SNMP_PERMISSION_RW    0
++#define SNMP_PERMISSION_RO    1
++#define SNMP_PERMISSION_NONE  2
++/* Inject the get/set community string ("" or NULL => "public") and the
++   permission level. Call before snmpd_run(), like snmp_set_allowed_ips(). */
++void snmp_set_community(const char *community);
++void snmp_set_permission(uint8_t perm);
++/* Trap community (separate from the agent community). "" / NULL => "public". */
++void snmp_set_trap_community(const char *community);
++const char *snmp_get_trap_community(void);
  int32_t snmpd_run(void);
  int32_t snmp_sendTrap(uint8_t * managerIP, uint8_t * agentIP, int8_t* community, dataEntryType enterprise_oid, uint32_t genericTrap, uint32_t specificTrap, uint32_t va_count, ...);
 +int32_t snmp_sendTrapV2c(uint8_t * managerIP, uint8_t * agentIP, int8_t* community, dataEntryType enterprise_oid, uint32_t genericTrap, uint32_t specificTrap, uint32_t va_count, ...);
@@ -585,10 +678,10 @@ index 02c83fd..ea9ac4a 100644
  // SNMP Time handler functions
  void SNMP_time_handler(void);
 diff --git a/Internet/SNMP/snmp_custom.c b/Internet/SNMP/snmp_custom.c
-index 68590c7..8124fb7 100644
+index 68590c7..7482ec4 100644
 --- a/Internet/SNMP/snmp_custom.c
 +++ b/Internet/SNMP/snmp_custom.c
-@@ -1,147 +1,202 @@
+@@ -1,147 +1,204 @@
 -
 -/********************************************************************************************
 - * SNMP : User Customization Part
@@ -902,8 +995,10 @@ index 68590c7..8124fb7 100644
 +    memcpy(enterprise_oid.oid, NOTIFY_OID, sizeof(NOTIFY_OID));
 +    enterprise_oid.dataType = SNMPDTYPE_OBJ_ID;
 +
-+    /* genericTrap = 6 (enterpriseSpecific) -> trapOID = enterprise_oid */
-+    snmp_sendTrapV2c((uint8_t *)managerIP, (uint8_t *)agentIP, (void *)COMMUNITY,
++    /* genericTrap = 6 (enterpriseSpecific) -> trapOID = enterprise_oid.
++       Trap community is runtime-configurable (snmp_set_trap_community). */
++    snmp_sendTrapV2c((uint8_t *)managerIP, (uint8_t *)agentIP,
++                     (int8_t *)snmp_get_trap_community(),
 +                     enterprise_oid, 6, 0, 1, &vb);
 +}
  

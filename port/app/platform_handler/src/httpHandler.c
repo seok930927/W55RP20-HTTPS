@@ -434,6 +434,14 @@ static int https_send_config_json(wiz_tls_context *tls_ctx) {
         n += snprintf(body + n, sizeof(body) - n,
                       "\"trap_ip%d\":\"%u.%u.%u.%u\",", i, ip[0], ip[1], ip[2], ip[3]);
     }
+    /* SNMP access control — community strings resolve empty => "public" for display. */
+    n += snprintf(body + n, sizeof(body) - n,
+                  "\"snmp_community\":\"%s\",\"snmp_perm\":%u,"
+                  "\"trap_community\":\"%s\",\"trap_accept\":%u,",
+                  conf->snmp_community[0] ? conf->snmp_community : SNMP_COMMUNITY_DEFAULT,
+                  conf->snmp_perm,
+                  conf->trap_community[0] ? conf->trap_community : SNMP_COMMUNITY_DEFAULT,
+                  conf->trap_disable ? 0u : 1u);   /* UI accept: 1=YES(enabled) */
     for (int i = 0; i < WEB_ACCESS_IP_CNT; i++) {
         const uint8_t *ip = conf->web_access_ip[i];
         n += snprintf(body + n, sizeof(body) - n,
@@ -477,15 +485,55 @@ static int https_send_config_json(wiz_tls_context *tls_ctx) {
     return https_write_all(tls_ctx, (const unsigned char *)body, (size_t)n);
 }
 
+/*  Extract a JSON string value: key must include the trailing colon, e.g.
+    "\"snmp_community\":". Copies the (un-escaped) value up to the closing quote
+    into dst (always NUL-terminated, truncated to cap). Returns 1 if the key was
+    found and copied, 0 otherwise. Suitable for simple ASCII fields with no
+    embedded quotes/backslashes (community strings). */
+static int parse_json_str(const char *body, const char *key, char *dst, size_t cap) {
+    const char *p = strstr(body, key);
+    if (!p) {
+        return 0;
+    }
+    p += strlen(key);
+    while (*p == ' ') {
+        p++;
+    }
+    if (*p != '"') {
+        return 0;
+    }
+    p++;                                  /* skip opening quote */
+    size_t i = 0;
+    while (*p && *p != '"' && i < cap - 1) {
+        dst[i++] = *p++;
+    }
+    dst[i] = '\0';
+    return 1;
+}
+
 static int https_handle_config_post(wiz_tls_context *tls_ctx, const char *body) {
     DevConfig *conf = get_DevConfig_pointer();
-    static unsigned char post_extra_buf[768];
+    /*  Full /api/config POST body (~850 B incl. the SNMP access-control fields).
+        1536 leaves headroom for future fields. */
+    static unsigned char post_extra_buf[1536];
     const char *actual_body = body;
 
     if (!actual_body || *actual_body == '\0') {
-        int r = mbedtls_ssl_read(tls_ctx->ssl, post_extra_buf, sizeof(post_extra_buf) - 1);
-        if (r > 0) {
-            post_extra_buf[r] = '\0';
+        /*  The body can arrive as several TLS records; mbedtls_ssl_read returns
+            one record per call, so accumulate until the buffer fills or the peer
+            stops sending. Without this the trailing keys (the new SNMP fields)
+            were dropped and silently not saved. */
+        int total = 0;
+        while (total < (int)sizeof(post_extra_buf) - 1) {
+            int r = mbedtls_ssl_read(tls_ctx->ssl, post_extra_buf + total,
+                                     sizeof(post_extra_buf) - 1 - total);
+            if (r <= 0) {
+                break;
+            }
+            total += r;
+        }
+        if (total > 0) {
+            post_extra_buf[total] = '\0';
             actual_body = (const char *)post_extra_buf;
         }
     }
@@ -558,6 +606,35 @@ static int https_handle_config_post(wiz_tls_context *tls_ctx, const char *body) 
                                   : conf->snmp_option.trap_ip[k - SNMP_ALLOWED_IP_CNT];
                     ip[0] = (uint8_t)a; ip[1] = (uint8_t)b;
                     ip[2] = (uint8_t)c; ip[3] = (uint8_t)d;
+                    changed = 1;
+                }
+            }
+        }
+
+        /*  SNMP / Trap access control (community strings + perm + accept).
+            community: quoted string; perm/accept: small ints. */
+        if (parse_json_str(actual_body, "\"snmp_community\":",
+                           conf->snmp_community, sizeof(conf->snmp_community))) {
+            changed = 1;
+        }
+        if (parse_json_str(actual_body, "\"trap_community\":",
+                           conf->trap_community, sizeof(conf->trap_community))) {
+            changed = 1;
+        }
+        {
+            const char *p = strstr(actual_body, "\"snmp_perm\":");
+            if (p) {
+                unsigned int v = 0;
+                if (sscanf(p + strlen("\"snmp_perm\":"), "%u", &v) == 1 && v <= SNMP_PERM_NONE) {
+                    conf->snmp_perm = (uint8_t)v;
+                    changed = 1;
+                }
+            }
+            p = strstr(actual_body, "\"trap_accept\":");
+            if (p) {
+                unsigned int v = 0;
+                if (sscanf(p + strlen("\"trap_accept\":"), "%u", &v) == 1) {
+                    conf->trap_disable = v ? 0 : 1;   /* UI: 1=YES(enabled) => disable=0 */
                     changed = 1;
                 }
             }
