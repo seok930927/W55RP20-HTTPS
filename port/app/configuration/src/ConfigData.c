@@ -240,6 +240,9 @@ void set_DevConfig_ext_to_factory_value(void) {
     dev_config.https_port      = HTTPS_PORT_DEFAULT;
     dev_config.snmp_agent_port = SNMP_AGENT_PORT_DEFAULT;
     memset(dev_config.web_access_ip, 0x00, sizeof(dev_config.web_access_ip)); /* allow any */
+    dev_config.serial_intf_sel = UART_IF_RS232_TTL;
+    dev_config.serial485_intf_sel = UART_IF_RS485;
+    dev_config.serial485_de_pin = RS485_UART_DE_PIN;
 
     memset(dev_config.reserved_ext, 0x00, sizeof(dev_config.reserved_ext));
 }

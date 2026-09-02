@@ -244,15 +244,20 @@ void DATA0_UART_Configuration(void) {
     else { // UART_IF_RS422 || UART_IF_RS485
         uart_set_hw_flow(UART_ID, false, false);
 
-        // GPIO configuration (RTS pin -> GPIO: 485SEL)
-        if ((serial_option->flow_control != flow_rtsonly) && (serial_option->flow_control != flow_reverserts)) {
-            uart_if_mode = get_uart_rs485_sel();
+        /*  RTS pin becomes the 485SEL / DE direction line here, so Handshake is
+            ignored in this mode. uart_interface was already resolved from
+            serial_intf_sel in set_minimal_runtime_config(), so it names the
+            variant directly; the legacy flow/strap sources stay as fallbacks. */
+        if ((serial_option->uart_interface == UART_IF_RS422) ||
+                (serial_option->uart_interface == UART_IF_RS485) ||
+                (serial_option->uart_interface == UART_IF_RS485_REVERSE)) {
+            uart_if_mode = serial_option->uart_interface;
+        } else if (serial_option->flow_control == flow_rtsonly) {
+            uart_if_mode = UART_IF_RS485;
+        } else if (serial_option->flow_control == flow_reverserts) {
+            uart_if_mode = UART_IF_RS485_REVERSE;
         } else {
-            if (serial_option->flow_control == flow_rtsonly) {
-                uart_if_mode = UART_IF_RS485;
-            } else {
-                uart_if_mode = UART_IF_RS485_REVERSE;
-            }
+            uart_if_mode = get_uart_rs485_sel();
         }
         uart_rs485_rs422_init();
         serial_option->uart_interface = uart_if_mode;

@@ -446,17 +446,25 @@ static int https_send_config_json(wiz_tls_context *tls_ctx) {
         n += snprintf(body + n, sizeof(body) - n,
                       "\"https_port\":%u,\"snmp_port\":%u,", (unsigned int)hp, (unsigned int)sp);
     }
-    /* RS-232 (uart1 / serial_option) */
+    /*  RS-232 (uart1 / serial_option). serial_intf comes from the extension
+        section (serial_intf_sel), not from serial_option.uart_interface, which
+        the bootloader rewrites under a different enum. */
     n += snprintf(body + n, sizeof(body) - n,
+                  "\"serial_intf\":%u,"
                   "\"serial_baud\":%u,\"serial_data\":%u,\"serial_parity\":%u,"
                   "\"serial_flow\":%u,\"serial_mode\":%u,",
+                  conf->serial_intf_sel,
                   conf->serial_option.baud_rate, conf->serial_option.data_bits,
                   conf->serial_option.parity, conf->serial_option.flow_control,
                   conf->serial_option.protocol);
     /* RS-485 (uart0 / serial_option_485) */
     n += snprintf(body + n, sizeof(body) - n,
+                  "\"serial485_intf\":%u,\"serial485_de\":%u,"
                   "\"serial485_baud\":%u,\"serial485_data\":%u,\"serial485_parity\":%u,"
                   "\"serial485_flow\":%u,\"serial485_mode\":%u}",
+                  conf->serial485_intf_sel,
+                  (conf->serial485_de_pin != 0 && conf->serial485_de_pin <= 29)
+                  ? conf->serial485_de_pin : RS485_UART_DE_PIN,
                   conf->serial_option_485.baud_rate, conf->serial_option_485.data_bits,
                   conf->serial_option_485.parity, conf->serial_option_485.flow_control,
                   conf->serial_option_485.protocol);
@@ -596,11 +604,14 @@ static int https_handle_config_post(wiz_tls_context *tls_ctx, const char *body) 
             uint8_t *field;
             unsigned int max;
         } sfields[] = {
+            { "\"serial_intf\":",   &conf->serial_intf_sel,            3  },
             { "\"serial_baud\":",   &conf->serial_option.baud_rate,    19 },
             { "\"serial_data\":",   &conf->serial_option.data_bits,    2  },
             { "\"serial_parity\":", &conf->serial_option.parity,       4  },
             { "\"serial_flow\":",   &conf->serial_option.flow_control, 4  },
             { "\"serial_mode\":",   &conf->serial_option.protocol,     2  },
+            { "\"serial485_intf\":",   &conf->serial485_intf_sel,             3  },
+            { "\"serial485_de\":",     &conf->serial485_de_pin,               29 },
             { "\"serial485_baud\":",   &conf->serial_option_485.baud_rate,    19 },
             { "\"serial485_data\":",   &conf->serial_option_485.data_bits,    2  },
             { "\"serial485_parity\":", &conf->serial_option_485.parity,       4  },

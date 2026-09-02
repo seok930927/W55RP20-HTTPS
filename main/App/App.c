@@ -173,7 +173,16 @@ static void set_minimal_runtime_config(void) {
 
     dev_config->network_connection.working_mode = TCP_SERVER_MODE;
     dev_config->network_connection.dns_use = DISABLE;
-    dev_config->serial_option.uart_interface = UART_IF_RS232_TTL;
+    /*  serial_option.uart_interface is a per-boot scratch value, NOT storage: the
+        bootloader owns that same flash byte under a different enum and rewrites
+        it after a firmware update. The real setting lives in serial_intf_sel
+        (extension section, which the bootloader cannot reach) and is copied in
+        here on every boot, so whatever boot wrote is always discarded. */
+    uint8_t intf = dev_config->serial_intf_sel;
+    if (intf > UART_IF_RS485_REVERSE) {
+        intf = UART_IF_RS232_TTL;
+    }
+    dev_config->serial_option.uart_interface = intf;
     /*  NOTE: flow_control is no longer forced here — it comes from stored
         serial_option so the web "Handshake" setting (#11) persists across reboot.
         baud_rate / data_bits / parity / protocol were never forced (stored). */

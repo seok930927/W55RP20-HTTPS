@@ -204,10 +204,11 @@ struct __snmp_option {
 #define DEVCONFIG_RESERVED_LEGACY_SIZE  64
 /*  reserved_ext shrinks as named ext fields are added, keeping sizeof(DevConfig)
     constant so existing flash blobs stay layout-compatible.
-    89 = 128 - https_session_timeout_min(2) - snmp_option slot growth(16)
+    86 = 128 - https_session_timeout_min(2) - snmp_option slot growth(16)
              - sizeof(struct __serial_option)(9) - https_port(2) - snmp_agent_port(2)
-             - web_access_ip(8). */
-#define DEVCONFIG_RESERVED_EXT_SIZE    89
+             - web_access_ip(8) - serial_intf_sel(1) - serial485_intf_sel(1)
+             - serial485_de_pin(1). */
+#define DEVCONFIG_RESERVED_EXT_SIZE    86
 
 /* Service port defaults / bounds (0 stored => use default at runtime). */
 #define HTTPS_PORT_DEFAULT        443
@@ -249,6 +250,21 @@ typedef struct __DevConfig {
     uint16_t https_port;        /* HTTPS server TCP port; 0 => HTTPS_PORT_DEFAULT (443) */
     uint16_t snmp_agent_port;   /* SNMP agent UDP port; 0 => SNMP_AGENT_PORT_DEFAULT (161) */
     uint8_t  web_access_ip[WEB_ACCESS_IP_CNT][4];  /* HTTPS source-IP allow list; all 0 => any */
+    /*  uart1 line-driver selection (enum uart_interface: 0 TTL/RS-232, 1 RS-422,
+        2 RS-485, 3 RS-485 reverse). Lives in the extension section on purpose:
+        the bootloader has no ext section at all, so it can never overwrite this
+        the way it overwrites the legacy serial_option.uart_interface byte (which
+        it owns under a DIFFERENT enum). set_minimal_runtime_config() copies this
+        into serial_option.uart_interface on every boot. */
+    uint8_t  serial_intf_sel;
+    /*  uart0 line-driver selection (enum uart_interface: 0 TTL/RS-232, 1 RS-422,
+        2 RS-485, 3 RS-485 reverse). Extension section, bootloader can't reach it. */
+    uint8_t  serial485_intf_sel;
+    /*  uart0 RS-485 DE / nRE GPIO number, used only when serial485_intf_sel is an
+        RS-485 mode. 0 (unset) or out-of-range => board default RS485_UART_DE_PIN;
+        GPIO0 is the UART TX pin so it can never be DE, making 0 a safe sentinel.
+        Lets the FW run on boards that route DE to a different pin. */
+    uint8_t  serial485_de_pin;
     uint8_t reserved_ext[DEVCONFIG_RESERVED_EXT_SIZE];
 } __attribute__((packed)) DevConfig;
 
