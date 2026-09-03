@@ -138,37 +138,56 @@ void uart_set_format_parity(uart_inst_t *uart, uint8_t data_bits, uint8_t stop_b
     }
 }
 
-void DATA0_UART_Configuration(void) {
-    struct __serial_option *serial_option = (struct __serial_option *) & (get_DevConfig_pointer()->serial_option);
+/*  Bring `uart` up from that port's own settings block. The two ports differ
+    only in which block they read and which pins they own, so both go through
+    here instead of each caller repeating the sequence. */
+void uart_port_configuration(uart_inst_t *uart) {
+    DevConfig *dev_config = get_DevConfig_pointer();
+    struct __serial_option *serial_option = (uart == uart0)
+                                            ? (struct __serial_option *) & (dev_config->serial_option_485)
+                                            : (struct __serial_option *) & (dev_config->serial_option);
+    uint8_t tx_pin = (uart == uart0) ? RS485_UART_TX_PIN : DATA0_UART_TX_PIN;
+    uint8_t rx_pin = (uart == uart0) ? RS485_UART_RX_PIN : DATA0_UART_RX_PIN;
+    /*  Which line driver this port runs. uart1 gets serial_intf_sel copied into
+        uart_interface by set_minimal_runtime_config(); uart0 has no such copy,
+        so read its extension field directly — otherwise bring-up and the TX
+        path (uart_de_mode_for) would disagree about the same port. */
+    uint8_t intf = (uart == uart0) ? uart_de_mode_for(uart)
+                                   : serial_option->uart_interface;
     uint8_t valid_arg = 0;
     uint8_t temp_data_bits, temp_stop_bits, temp_parity;
 
-    uart_deinit(UART_ID);
+    uart_deinit(uart);
 
     // Set up our UART with a basic baud rate.
-    uart_init(UART_ID, 2400);
+    uart_init(uart, 2400);
 
     // Set the TX and RX pins by using the function select on the GPIO
     // Set datasheet for more information on function select
-    gpio_init(DATA0_UART_TX_PIN);
-    gpio_init(DATA0_UART_RX_PIN);
-    gpio_init(DATA0_UART_CTS_PIN);
-    gpio_init(DATA0_UART_RTS_PIN);
+    gpio_init(tx_pin);
+    gpio_init(rx_pin);
+    /* CTS/RTS are wired on uart1 only; uart0 routes those GPIOs elsewhere. */
+    if (uart != uart0) {
+        gpio_init(DATA0_UART_CTS_PIN);
+        gpio_init(DATA0_UART_RTS_PIN);
+    }
 
-    gpio_set_function(DATA0_UART_TX_PIN, GPIO_FUNC_UART);
-    gpio_set_function(DATA0_UART_RX_PIN, GPIO_FUNC_UART);
-    gpio_set_function(DATA0_UART_CTS_PIN, GPIO_FUNC_UART);
-    gpio_set_function(DATA0_UART_RTS_PIN, GPIO_FUNC_UART);
-    gpio_pull_up(DATA0_UART_RX_PIN);
+    gpio_set_function(tx_pin, GPIO_FUNC_UART);
+    gpio_set_function(rx_pin, GPIO_FUNC_UART);
+    if (uart != uart0) {
+        gpio_set_function(DATA0_UART_CTS_PIN, GPIO_FUNC_UART);
+        gpio_set_function(DATA0_UART_RTS_PIN, GPIO_FUNC_UART);
+    }
+    gpio_pull_up(rx_pin);
 
     /* Set Baud Rate */
     if (serial_option->baud_rate < (sizeof(baud_table) / sizeof(baud_table[0]))) {
-        PRT_INFO("Real baudrate = %d\r\n", uart_set_baudrate(UART_ID, baud_table[serial_option->baud_rate]));
+        PRT_INFO("Real baudrate = %d\r\n", uart_set_baudrate(uart, baud_table[serial_option->baud_rate]));
         valid_arg = 1;
     }
 
     if (!valid_arg) {
-        PRT_INFO("Real baudrate = %d\r\n", uart_set_baudrate(UART_ID, baud_table[baud_115200]));
+        PRT_INFO("Real baudrate = %d\r\n", uart_set_baudrate(uart, baud_table[baud_115200]));
     }
 
     /* Set Data Bits */
@@ -186,6 +205,12 @@ void DATA0_UART_Configuration(void) {
         temp_data_bits = 8;
         serial_option->data_bits = word_len8;
         break;
+    }
+
+    /*  PL011 supports 5..8 bits only. uart_set_format() masks the field, so 9
+        would silently come out as 5 — clamp instead. */
+    if (temp_data_bits > 8) {
+        temp_data_bits = 8;
     }
 
     /* Set Stop Bits */
@@ -210,27 +235,27 @@ void DATA0_UART_Configuration(void) {
     temp_parity = serial_option->parity;
 
     /* Flow Control */
-    if (serial_option->uart_interface == UART_IF_RS232_TTL) {
+    if (intf == UART_IF_RS232_TTL) {
         // RS232 Hardware Flow Control
         //7     RTS     Request To Send     Output
         //8     CTS     Clear To Send       Input
         switch (serial_option->flow_control) {
         case flow_none:
-            uart_set_hw_flow(UART_ID, false, false);
+            uart_set_hw_flow(uart, false, false);
             break;
         case flow_rts_cts:
 #ifdef __USE_GPIO_HARDWARE_FLOWCONTROL__
-            uart_set_hw_flow(UART_ID, false, false);
+            uart_set_hw_flow(uart, false, false);
             set_uart_rts_pin_low(uartNum);
 #else
-            uart_set_hw_flow(UART_ID, true, true);
+            uart_set_hw_flow(uart, true, true);
 #endif
             break;
         case flow_xon_xoff:
-            uart_set_hw_flow(UART_ID, false, false);
+            uart_set_hw_flow(uart, false, false);
             break;
         default:
-            uart_set_hw_flow(UART_ID, false, false);
+            uart_set_hw_flow(uart, false, false);
             serial_option->flow_control = flow_none;
             break;
         }
@@ -238,36 +263,43 @@ void DATA0_UART_Configuration(void) {
 
 #ifdef __USE_UART_485_422__
     else { // UART_IF_RS422 || UART_IF_RS485
-        uart_set_hw_flow(UART_ID, false, false);
+        uart_set_hw_flow(uart, false, false);
 
         /*  RTS pin becomes the 485SEL / DE direction line here, so Handshake is
             ignored in this mode. uart_interface was already resolved from
             serial_intf_sel in set_minimal_runtime_config(), so it names the
             variant directly; the legacy flow/strap sources stay as fallbacks. */
         uint8_t uart_if_mode;
-        if ((serial_option->uart_interface == UART_IF_RS422) ||
-                (serial_option->uart_interface == UART_IF_RS485) ||
-                (serial_option->uart_interface == UART_IF_RS485_REVERSE)) {
-            uart_if_mode = serial_option->uart_interface;
+        if ((intf == UART_IF_RS422) ||
+                (intf == UART_IF_RS485) ||
+                (intf == UART_IF_RS485_REVERSE)) {
+            uart_if_mode = intf;
         } else if (serial_option->flow_control == flow_rtsonly) {
             uart_if_mode = UART_IF_RS485;
         } else if (serial_option->flow_control == flow_reverserts) {
             uart_if_mode = UART_IF_RS485_REVERSE;
-        } else {
+        } else if (uart != uart0) {
             uart_if_mode = get_uart_rs485_sel();
+        } else {
+            /* uart0 has no interface strap pin; RS-485 is the board wiring. */
+            uart_if_mode = UART_IF_RS485;
         }
-        uart_rs485_rs422_init(uart_de_pin_for(UART_ID), uart_if_mode);
+        uart_rs485_rs422_init(uart_de_pin_for(uart), uart_if_mode);
         serial_option->uart_interface = uart_if_mode;
     }
 #endif
 
     // Set our data format
-    uart_set_format_parity(UART_ID, temp_data_bits, temp_stop_bits, temp_parity);
-    uart_set_fifo_enabled(UART_ID, true);
+    uart_set_format_parity(uart, temp_data_bits, temp_stop_bits, temp_parity);
+    uart_set_fifo_enabled(uart, true);
 
     PRT_INFO("serial_option->flow_control = %d\r\n", serial_option->flow_control);
     PRT_INFO("data_bits = %d, stop_bits = %d, parity = %s\r\n", temp_data_bits, temp_stop_bits, parity_table[temp_parity]);
     PRT_INFO("baud = %d\r\n", baud_table[serial_option->baud_rate]);
+}
+
+void DATA0_UART_Configuration(void) {
+    uart_port_configuration(UART_ID);
 }
 
 void DATA0_UART_Deinit(void) {

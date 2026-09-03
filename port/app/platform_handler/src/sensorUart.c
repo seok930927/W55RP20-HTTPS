@@ -23,8 +23,6 @@
 
 #define UART_LINE_BUF_SIZE  64
 
-/* baud_table is defined (non-static) in uartHandler.c */
-extern uint32_t baud_table[];
 
 static SemaphoreHandle_t s_uart_sem = NULL;
 
@@ -90,40 +88,8 @@ static void sensorUart_rs485_rx_isr(void) {
     port has its OWN settings, independent of RS-232 (uart1 / serial_option).
     ========================================================================= */
 static void init_rs485_uart(void) {
-    struct __serial_option *opt =
-        (struct __serial_option *) & (get_DevConfig_pointer()->serial_option_485);
-
-    uart_init(uart0, 115200);
-
-    gpio_set_function(RS485_UART_TX_PIN, GPIO_FUNC_UART);
-    gpio_set_function(RS485_UART_RX_PIN, GPIO_FUNC_UART);
-    gpio_pull_up(RS485_UART_RX_PIN);
-
-    /* Baud rate */
-    uint32_t baud = 115200;
-    if (opt->baud_rate < 20) {
-        baud = baud_table[opt->baud_rate];
-    }
-    uart_set_baudrate(uart0, baud);
-
-    /* Data bits */
-    uint8_t dbits = (opt->data_bits == word_len7) ? 7 : 8;
-
-    /* Stop bits */
-    uint8_t sbits = (opt->stop_bits == stop_bit2) ? 2 : 1;
-
-    /* Parity — includes space/mark (PL011 stick parity) */
-    uart_set_format_parity(uart0, dbits, sbits, opt->parity);
-    uart_set_hw_flow(uart0, false, false);
-    uart_set_fifo_enabled(uart0, true);
-
-    /*  DE / nRE pin — only driven in an RS-485 mode (half duplex needs a
-        direction line). TTL/RS-232 and RS-422 are full duplex, so it is left
-        alone. Idle level = receive. */
-    uint8_t de_mode = uart_de_mode_for(uart0);
-    if (de_mode == UART_IF_RS485 || de_mode == UART_IF_RS485_REVERSE) {
-        uart_rs485_rs422_init(uart_de_pin_for(uart0), de_mode);
-    }
+    uart_port_configuration(uart0);
+    uart_set_hw_flow(uart0, false, false);   /* S/T/R never uses RTS/CTS */
 
     irq_set_exclusive_handler(UART0_IRQ, sensorUart_rs485_rx_isr);
     irq_set_enabled(UART0_IRQ, true);

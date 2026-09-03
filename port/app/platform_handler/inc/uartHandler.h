@@ -116,6 +116,9 @@ void uart_set_format_parity(uart_inst_t *uart, uint8_t data_bits, uint8_t stop_b
 void on_uart_rx(void);
 void DEBUG_UART_Configuration(void);
 void DATA0_UART_Configuration(void);
+/*  Bring a port up from its own serial_option block (uart0 reads
+    serial_option_485). DATA0_UART_Configuration() is this for UART_ID. */
+void uart_port_configuration(uart_inst_t *uart);
 void DATA0_UART_Deinit(void);
 void DATA0_UART_Interrupt_Enable(void);
 void DATA1_UART_Configuration(void);

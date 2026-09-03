@@ -40,34 +40,16 @@ void modbusMaster_init(uart_inst_t *uart) {
     struct __serial_option *opt = (uart == uart0)
                                   ? &cfg->serial_option_485
                                   : &cfg->serial_option;
-    uint8_t tx_pin = (uart == uart0) ? RS485_UART_TX_PIN : DATA0_UART_TX_PIN;
-    uint8_t rx_pin = (uart == uart0) ? RS485_UART_RX_PIN : DATA0_UART_RX_PIN;
 
-    uart_init(uart, 9600);
-    gpio_set_function(tx_pin, GPIO_FUNC_UART);
-    gpio_set_function(rx_pin, GPIO_FUNC_UART);
-    gpio_pull_up(rx_pin);
-
-    uint32_t baud = 9600;
-    if (opt->baud_rate < 20) {
-        baud = baud_table[opt->baud_rate];
-    }
-    uint32_t actual = uart_set_baudrate(uart, baud);
-    PRT_INFO("modbusMaster: baud requested=%lu  ACTUAL=%lu  (clk_peri=%lu)\r\n",
-             (unsigned long)baud, (unsigned long)actual,
-             (unsigned long)clock_get_hz(clk_peri));
-
-    uint8_t dbits = (opt->data_bits == word_len7) ? 7 : 8;
-    uint8_t sbits = (opt->stop_bits == stop_bit2) ? 2 : 1;
-    uart_set_format_parity(uart, dbits, sbits, opt->parity);
-    uart_set_hw_flow(uart, false, false);
-    uart_set_fifo_enabled(uart, true);
+    uart_port_configuration(uart);
+    uart_set_hw_flow(uart, false, false);   /* Modbus RTU never uses RTS/CTS */
 
     PRT_INFO("modbusMaster: master ready (uart%u, %lu-%u-%s-%u)\r\n",
              (uart == uart0) ? 0u : 1u,
-             (unsigned long)baud, dbits,
+             (unsigned long)baud_table[opt->baud_rate < baud_max ? opt->baud_rate : baud_115200],
+             (opt->data_bits == word_len7) ? 7 : 8,
              parity_table[opt->parity <= parity_mark ? opt->parity : parity_none],
-             sbits);
+             (opt->stop_bits == stop_bit2) ? 2 : 1);
 }
 
 /* Drain the RX FIFO of any stale bytes before a transaction. */
