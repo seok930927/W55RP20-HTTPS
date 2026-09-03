@@ -97,7 +97,8 @@ enum flow_ctrl {
 enum protocol {
     protocol_none = 0,
     modbus_rtu = 1,
-    modbus_ascii = 2
+    modbus_ascii = 2,
+    sec_ups = 3
 };
 
 extern uint32_t baud_table[];
