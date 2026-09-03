@@ -243,6 +243,7 @@ void set_DevConfig_ext_to_factory_value(void) {
     dev_config.serial_intf_sel = UART_IF_RS232_TTL;
     dev_config.serial485_intf_sel = UART_IF_RS485;
     dev_config.serial485_de_pin = RS485_UART_DE_PIN;
+    dev_config.serial_de_pin = DATA0_UART_RTS_PIN;
 
     /* SNMP access control — permissive defaults (match empty/0 on existing units) */
     memset(dev_config.snmp_community, 0x00, sizeof(dev_config.snmp_community));

@@ -110,14 +110,16 @@ int modbus_read_th(uart_inst_t *uart, uint8_t slave, int16_t *temp, int16_t *hum
         uart_rs485_disable() waits for the shift register to drain before it
         releases the bus, so the slave never sees a truncated frame. */
 #ifdef __USE_UART_485_422__
-    uart_rs485_enable();
+    uint8_t de_pin = uart_de_pin_for(uart);
+    uint8_t de_mode = uart_de_mode_for(uart);
+    uart_rs485_enable(de_pin, de_mode);
 #endif
     for (int i = 0; i < 8; i++) {
         uart_putc_raw(uart, req[i]);
     }
     uart_tx_wait_blocking(uart);
 #ifdef __USE_UART_485_422__
-    uart_rs485_disable();
+    uart_rs485_disable(uart, de_pin, de_mode);
 #endif
 
     uint8_t rsp[MODBUS_RSP_LEN];

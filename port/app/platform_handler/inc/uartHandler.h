@@ -144,8 +144,13 @@ int8_t is_data_buffer_empty(void);
 int8_t is_data_buffer_full(void);
 void data_buffer_flush(void);
 uint8_t get_uart_rs485_sel(void);
-void uart_rs485_rs422_init(void);
-void uart_rs485_disable(void);
-void uart_rs485_enable(void);
+void uart_rs485_rs422_init(uint8_t de_pin, uint8_t uart_if_mode);
+void uart_rs485_disable(uart_inst_t *uart, uint8_t de_pin, uint8_t uart_if_mode);
+void uart_rs485_enable(uint8_t de_pin, uint8_t uart_if_mode);
+
+/*  DE pin / line-driver mode for a port. `uart` selects which of the two
+    serial ports to describe. */
+uint8_t uart_de_pin_for(uart_inst_t *uart);
+uint8_t uart_de_mode_for(uart_inst_t *uart);
 
 #endif /* UARTHANDLER_H_ */

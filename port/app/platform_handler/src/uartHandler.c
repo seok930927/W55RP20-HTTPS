@@ -45,8 +45,8 @@ static uint8_t rts_status = UART_RTS_LOW;
 #endif
 
 // UART Interface selector; RS-422 or RS-485 use only
-static uint8_t uart_if_mode = UART_IF_RS422;
-
+//static uint8_t uart_if_mode = UART_IF_RS422;
+// 외부 매개변수에 의존한다
 extern xSemaphoreHandle seg_u2e_sem;
 extern xSemaphoreHandle segcp_uart_sem;
 
@@ -211,10 +211,6 @@ void DATA0_UART_Configuration(void) {
 
     /* Flow Control */
     if (serial_option->uart_interface == UART_IF_RS232_TTL) {
-        /*  Full duplex: no direction line. Recording the mode here keeps
-            uart_rs485_enable()/disable() no-ops by intent rather than by relying
-            on the initial value of uart_if_mode. */
-        uart_if_mode = UART_IF_RS232_TTL;
         // RS232 Hardware Flow Control
         //7     RTS     Request To Send     Output
         //8     CTS     Clear To Send       Input
@@ -248,6 +244,7 @@ void DATA0_UART_Configuration(void) {
             ignored in this mode. uart_interface was already resolved from
             serial_intf_sel in set_minimal_runtime_config(), so it names the
             variant directly; the legacy flow/strap sources stay as fallbacks. */
+        uint8_t uart_if_mode;
         if ((serial_option->uart_interface == UART_IF_RS422) ||
                 (serial_option->uart_interface == UART_IF_RS485) ||
                 (serial_option->uart_interface == UART_IF_RS485_REVERSE)) {
@@ -259,7 +256,7 @@ void DATA0_UART_Configuration(void) {
         } else {
             uart_if_mode = get_uart_rs485_sel();
         }
-        uart_rs485_rs422_init();
+        uart_rs485_rs422_init(uart_de_pin_for(UART_ID), uart_if_mode);
         serial_option->uart_interface = uart_if_mode;
     }
 #endif
@@ -353,12 +350,12 @@ int32_t platform_uart_putc(uint16_t ch) {
 int32_t platform_uart_puts(uint8_t* buf, uint16_t bytes) {
     uint32_t i;
 
-    uart_rs485_enable();
+    uart_rs485_enable(uart_de_pin_for(UART_ID), uart_de_mode_for(UART_ID));
     for (i = 0; i < bytes; i++) {
         platform_uart_putc(buf[i]);
         device_wdt_reset();
     }
-    uart_rs485_disable();
+    uart_rs485_disable(UART_ID, uart_de_pin_for(UART_ID), uart_de_mode_for(UART_ID));
 
     return bytes;
 }
@@ -367,43 +364,54 @@ int32_t platform_uart_puts(uint8_t* buf, uint16_t bytes) {
 uint8_t get_uart_rs485_sel(void) {
     GPIO_Configuration(DATA0_UART_RTS_PIN, GPIO_IN, IO_PULLUP);// UART0 RTS pin: GPIO / Input
     if (GPIO_Input_Read(DATA0_UART_RTS_PIN) == IO_LOW) {
-        uart_if_mode = UART_IF_RS422;
-    } else {
-        uart_if_mode = UART_IF_RS485;
+        return UART_IF_RS422;
     }
-
-    return uart_if_mode;
-
+    return UART_IF_RS485;
 }
 
-void uart_rs485_rs422_init(void) {
-    GPIO_Configuration(DATA0_UART_RTS_PIN, GPIO_OUT, IO_NOPULL); // UART0 RTS pin: GPIO / Output
+uint8_t uart_de_pin_for(uart_inst_t *uart) {
+    DevConfig *cfg = get_DevConfig_pointer();
+    uint8_t p = (uart == uart0) ? cfg->serial485_de_pin : cfg->serial_de_pin;
+    if (p != 0 && p <= 29) {
+        return p;
+    }
+    return (uart == uart0) ? RS485_UART_DE_PIN : DATA0_UART_RTS_PIN;
+}
+
+uint8_t uart_de_mode_for(uart_inst_t *uart) {
+    DevConfig *cfg = get_DevConfig_pointer();
+    uint8_t uart_if_mode = (uart == uart0) ? cfg->serial485_intf_sel : cfg->serial_intf_sel;
+    return (uart_if_mode > UART_IF_RS485_REVERSE) ? UART_IF_RS232_TTL : uart_if_mode;
+}
+
+void uart_rs485_rs422_init(uint8_t de_pin, uint8_t uart_if_mode) {
+    GPIO_Configuration(de_pin, GPIO_OUT, IO_NOPULL); // DE pin: GPIO / Output
     if (uart_if_mode == UART_IF_RS485) {
-        GPIO_Output_Reset(DATA0_UART_RTS_PIN);    // UART0 RTS pin init, Set the signal low
+        GPIO_Output_Reset(de_pin);    // DE pin init, Set the signal low
     } else {
-        GPIO_Output_Set(DATA0_UART_RTS_PIN);    // UART0 RTS pin init, Set the signal low
+        GPIO_Output_Set(de_pin);    // DE pin init, Set the signal low
     }
 }
 
-void uart_rs485_enable(void) {
+void uart_rs485_enable(uint8_t de_pin, uint8_t uart_if_mode) {
     if (uart_if_mode == UART_IF_RS485) {
-        GPIO_Output_Set(DATA0_UART_RTS_PIN);
+        GPIO_Output_Set(de_pin);
     } else if (uart_if_mode == UART_IF_RS485_REVERSE) {
-        GPIO_Output_Reset(DATA0_UART_RTS_PIN);
+        GPIO_Output_Reset(de_pin);
     }    //UART_IF_RS422: None
 }
 
 
-void uart_rs485_disable(void) {
+void uart_rs485_disable(uart_inst_t *uart, uint8_t de_pin, uint8_t uart_if_mode) {
     if (uart_if_mode == UART_IF_RS485) {
-        uart_tx_wait_blocking(UART_ID);
-        // RTS pin -> Low;
-        GPIO_Output_Reset(DATA0_UART_RTS_PIN);
+        uart_tx_wait_blocking(uart);
+        // DE pin -> Low;
+        GPIO_Output_Reset(de_pin);
 
     } else if (uart_if_mode == UART_IF_RS485_REVERSE) {
-        uart_tx_wait_blocking(UART_ID);
-        // RTS pin -> High
-        GPIO_Output_Set(DATA0_UART_RTS_PIN);
+        uart_tx_wait_blocking(uart);
+        // DE pin -> High
+        GPIO_Output_Set(de_pin);
     }
     //UART_IF_RS422: None
 }

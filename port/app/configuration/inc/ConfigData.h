@@ -209,12 +209,12 @@ struct __snmp_option {
 #define DEVCONFIG_RESERVED_LEGACY_SIZE  64
 /*  reserved_ext shrinks as named ext fields are added, keeping sizeof(DevConfig)
     constant so existing flash blobs stay layout-compatible.
-    52 = 128 - https_session_timeout_min(2) - snmp_option slot growth(16)
+    51 = 128 - https_session_timeout_min(2) - snmp_option slot growth(16)
              - sizeof(struct __serial_option)(9) - https_port(2) - snmp_agent_port(2)
              - web_access_ip(8) - serial_intf_sel(1) - serial485_intf_sel(1)
-             - serial485_de_pin(1) - snmp_community(16) - trap_community(16)
-             - snmp_perm(1) - trap_disable(1). */
-#define DEVCONFIG_RESERVED_EXT_SIZE    52
+             - serial485_de_pin(1) - serial_de_pin(1) - snmp_community(16)
+             - trap_community(16) - snmp_perm(1) - trap_disable(1). */
+#define DEVCONFIG_RESERVED_EXT_SIZE    51
 
 /* Service port defaults / bounds (0 stored => use default at runtime). */
 #define HTTPS_PORT_DEFAULT        443
@@ -271,6 +271,9 @@ typedef struct __DevConfig {
         GPIO0 is the UART TX pin so it can never be DE, making 0 a safe sentinel.
         Lets the FW run on boards that route DE to a different pin. */
     uint8_t  serial485_de_pin;
+    /*  uart1 RS-485 DE / nRE GPIO number. Same 0-means-unset rule as above;
+        0 => board default DATA0_UART_RTS_PIN. */
+    uint8_t  serial_de_pin;
     /*  ── SNMP access control (extension section) ──
         All four are chosen so an existing unit (reserved_ext == 0) keeps the
         pre-feature behaviour without a version bump:

@@ -28,29 +28,6 @@ extern uint32_t baud_table[];
 
 static SemaphoreHandle_t s_uart_sem = NULL;
 
-/*  uart0 line-driver selection (serial485_intf_sel, extension section).
-    Only the RS-485 modes drive the DE / nRE direction line. */
-static uint8_t rs485_intf(void) {
-    uint8_t v = get_DevConfig_pointer()->serial485_intf_sel;
-    return (v > UART_IF_RS485_REVERSE) ? UART_IF_RS485 : v;
-}
-static uint8_t rs485_needs_de(void) {
-    uint8_t v = rs485_intf();
-    return (v == UART_IF_RS485) || (v == UART_IF_RS485_REVERSE);
-}
-/* Idle (receive) level of the DE pin: LOW for RS-485, HIGH for reverse. */
-static uint8_t rs485_de_idle(void) {
-    return (rs485_intf() == UART_IF_RS485_REVERSE) ? 1 : 0;
-}
-/*  DE / nRE pin number, web-configurable (serial485_de_pin) so the firmware can
-    run on boards that route DE to a different GPIO. 0 (unset — existing units
-    read 0, and GPIO0 is the UART TX pin so it can never be DE) or out-of-range
-    => board default RS485_UART_DE_PIN. */
-static uint8_t rs485_de_pin(void) {
-    uint8_t p = get_DevConfig_pointer()->serial485_de_pin;
-    return (p != 0 && p <= 29) ? p : RS485_UART_DE_PIN;
-}
-
 volatile uint32_t dbg_rs232_isr_cnt = 0;
 volatile uint32_t dbg_rs485_isr_cnt = 0;
 
@@ -143,10 +120,9 @@ static void init_rs485_uart(void) {
     /*  DE / nRE pin — only driven in an RS-485 mode (half duplex needs a
         direction line). TTL/RS-232 and RS-422 are full duplex, so it is left
         alone. Idle level = receive. */
-    if (rs485_needs_de()) {
-        gpio_init(rs485_de_pin());
-        gpio_set_dir(rs485_de_pin(), GPIO_OUT);
-        gpio_put(rs485_de_pin(), rs485_de_idle());
+    uint8_t de_mode = uart_de_mode_for(uart0);
+    if (de_mode == UART_IF_RS485 || de_mode == UART_IF_RS485_REVERSE) {
+        uart_rs485_rs422_init(uart_de_pin_for(uart0), de_mode);
     }
 
     irq_set_exclusive_handler(UART0_IRQ, sensorUart_rs485_rx_isr);
@@ -154,7 +130,7 @@ static void init_rs485_uart(void) {
     uart_set_irq_enables(uart0, true, false);   /* RX irq only */
 
     PRT_INFO("sensorUart: RS-485 ready (uart0, TX=GPIO%d, RX=GPIO%d, DE=GPIO%d)\r\n",
-             RS485_UART_TX_PIN, RS485_UART_RX_PIN, rs485_de_pin());
+             RS485_UART_TX_PIN, RS485_UART_RX_PIN, uart_de_pin_for(uart0));
 }
 
 void sensorUart_init(void) {
@@ -192,19 +168,15 @@ void sensorUart_init(void) {
     port functions. See [U2] for how to track the originating port.
     ========================================================================= */
 static void rs485_tx_str(const char *s) {
-    uint8_t de = rs485_needs_de();
-    uint8_t pin = rs485_de_pin();
-    if (de) {
-        gpio_put(pin, !rs485_de_idle());   /* enable driver */
-    }
+    uint8_t pin = uart_de_pin_for(uart0);
+    uint8_t mode = uart_de_mode_for(uart0);
+
+    uart_rs485_enable(pin, mode);
     const char *p = s;
     while (*p) {
         uart_putc_raw(uart0, (uint8_t)*p++);
     }
-    uart_tx_wait_blocking(uart0);
-    if (de) {
-        gpio_put(pin, rs485_de_idle());    /* back to receive */
-    }
+    uart_rs485_disable(uart0, pin, mode);
 }
 
 /* Send on RS-232 (uart1) and RS-485 (uart0) simultaneously. */
