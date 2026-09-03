@@ -287,7 +287,7 @@ void start_task(void *argument) {
     xTaskCreate(segcp_tcp_task, "SEGCP_tcp_Task", SEGCP_TCP_TASK_STACK_SIZE, NULL, SEGCP_TCP_TASK_PRIORITY, NULL);
     xTaskCreate(sensorUart_task, "Sensor_UART_Task", SENSOR_UART_TASK_STACK_SIZE, NULL, SENSOR_UART_TASK_PRIORITY, NULL);
     if (modbus_mode) {
-        xTaskCreate(modbusMaster_task, "Modbus_Master_Task", MODBUS_MASTER_TASK_STACK_SIZE, NULL, MODBUS_MASTER_TASK_PRIORITY, NULL);
+        xTaskCreate(modbusMaster_task, "Modbus_Master_Task", MODBUS_MASTER_TASK_STACK_SIZE, uart1, MODBUS_MASTER_TASK_PRIORITY, NULL);
     }
     // xTaskCreate(heap_monitor_task, "Heap_Monitor_Task", HEAP_MONITOR_TASK_STACK_SIZE, NULL, HEAP_MONITOR_TASK_PRIORITY, NULL);
 #ifdef __USE_WATCHDOG__

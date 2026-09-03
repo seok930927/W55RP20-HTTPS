@@ -2,6 +2,7 @@
 #define _MODBUS_MASTER_H_
 
 #include <stdint.h>
+#include "hardware/uart.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,17 +23,17 @@ extern "C" {
     manage. Active only when DevConfig.serial_option.protocol == modbus_rtu
     (the web RS-232 "Mode" selector); otherwise uart1 keeps the S/T/R role. */
 
-/*  Configure uart1 (RS-232) for Modbus: baud/format from serial_option.
+/*  Configure `uart` for Modbus: baud/format from the matching serial_option.
     No DE pin, no RX IRQ. The master polls synchronously. */
-void modbusMaster_init(void);
+void modbusMaster_init(uart_inst_t *uart);
 
 /*  Poll one slave for temperature + humidity.
     Returns 0 on success (fills *temp/*hum), negative on error:
       -1 timeout / short frame, -2 CRC error, -3 unexpected header. */
-int modbus_read_th(uint8_t slave, int16_t *temp, int16_t *hum);
+int modbus_read_th(uart_inst_t *uart, uint8_t slave, int16_t *temp, int16_t *hum);
 
 /*  FreeRTOS task: periodically polls the configured slave range and writes
-    results into the device bank. Pass pvParameters = NULL. */
+    results into the device bank. Pass pvParameters = the uart_inst_t * to use. */
 void modbusMaster_task(void *argument);
 
 #ifdef __cplusplus

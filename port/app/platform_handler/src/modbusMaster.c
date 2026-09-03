@@ -32,54 +32,58 @@ extern uint32_t baud_table[];
 #define MODBUS_RSP_TIMEOUT   150    /* ms to wait for a full response frame      */
 #define MODBUS_POLL_PERIOD   1000   /* ms between full poll cycles               */
 
-/*  Configure uart1 (RS-232) for Modbus. baud/format come from serial_option so
-    the web "시리얼 RS-232" settings apply (sensor default is 9600 8N1 — set
-    Baud=9600). RS-232 is full-duplex: separate TX/RX lines, NO DE direction pin.
+/*  Configure `uart` for Modbus. baud/format come from that port's serial_option
+    so the web serial settings apply (sensor default is 9600 8N1 — set Baud=9600).
     No RX IRQ: the master drains the RX FIFO itself. */
-void modbusMaster_init(void) {
-    struct __serial_option *opt =
-        (struct __serial_option *) & (get_DevConfig_pointer()->serial_option);
+void modbusMaster_init(uart_inst_t *uart) {
+    DevConfig *cfg = get_DevConfig_pointer();
+    struct __serial_option *opt = (uart == uart0)
+                                  ? &cfg->serial_option_485
+                                  : &cfg->serial_option;
+    uint8_t tx_pin = (uart == uart0) ? RS485_UART_TX_PIN : DATA0_UART_TX_PIN;
+    uint8_t rx_pin = (uart == uart0) ? RS485_UART_RX_PIN : DATA0_UART_RX_PIN;
 
-    uart_init(uart1, 9600);
-    gpio_set_function(DATA0_UART_TX_PIN, GPIO_FUNC_UART);
-    gpio_set_function(DATA0_UART_RX_PIN, GPIO_FUNC_UART);
-    gpio_pull_up(DATA0_UART_RX_PIN);
+    uart_init(uart, 9600);
+    gpio_set_function(tx_pin, GPIO_FUNC_UART);
+    gpio_set_function(rx_pin, GPIO_FUNC_UART);
+    gpio_pull_up(rx_pin);
 
     uint32_t baud = 9600;
     if (opt->baud_rate < 20) {
         baud = baud_table[opt->baud_rate];
     }
-    uint32_t actual = uart_set_baudrate(uart1, baud);
+    uint32_t actual = uart_set_baudrate(uart, baud);
     PRT_INFO("modbusMaster: baud requested=%lu  ACTUAL=%lu  (clk_peri=%lu)\r\n",
              (unsigned long)baud, (unsigned long)actual,
              (unsigned long)clock_get_hz(clk_peri));
 
     uint8_t dbits = (opt->data_bits == word_len7) ? 7 : 8;
     uint8_t sbits = (opt->stop_bits == stop_bit2) ? 2 : 1;
-    uart_set_format_parity(uart1, dbits, sbits, opt->parity);
-    uart_set_hw_flow(uart1, false, false);
-    uart_set_fifo_enabled(uart1, true);
+    uart_set_format_parity(uart, dbits, sbits, opt->parity);
+    uart_set_hw_flow(uart, false, false);
+    uart_set_fifo_enabled(uart, true);
 
-    PRT_INFO("modbusMaster: RS-232 master ready (uart1, %lu-%u-%s-%u)\r\n",
+    PRT_INFO("modbusMaster: master ready (uart%u, %lu-%u-%s-%u)\r\n",
+             (uart == uart0) ? 0u : 1u,
              (unsigned long)baud, dbits,
              parity_table[opt->parity <= parity_mark ? opt->parity : parity_none],
              sbits);
 }
 
 /* Drain the RX FIFO of any stale bytes before a transaction. */
-static void mb_flush_rx(void) {
-    while (uart_is_readable(uart1)) {
-        (void)uart_getc(uart1);
+static void mb_flush_rx(uart_inst_t *uart) {
+    while (uart_is_readable(uart)) {
+        (void)uart_getc(uart);
     }
 }
 
 /* Read up to `want` bytes within `timeout_ms`. Returns the number received. */
-static int mb_recv(uint8_t *buf, int want, uint32_t timeout_ms) {
+static int mb_recv(uart_inst_t *uart, uint8_t *buf, int want, uint32_t timeout_ms) {
     TickType_t start = xTaskGetTickCount();
     int got = 0;
     while (got < want) {
-        while (got < want && uart_is_readable(uart1)) {
-            buf[got++] = (uint8_t)uart_getc(uart1);
+        while (got < want && uart_is_readable(uart)) {
+            buf[got++] = (uint8_t)uart_getc(uart);
         }
         if (got >= want) {
             break;
@@ -92,14 +96,14 @@ static int mb_recv(uint8_t *buf, int want, uint32_t timeout_ms) {
     return got;
 }
 
-int modbus_read_th(uint8_t slave, int16_t *temp, int16_t *hum) {
+int modbus_read_th(uart_inst_t *uart, uint8_t slave, int16_t *temp, int16_t *hum) {
     /* Request: read 2 input registers (Func 04) from address 0x0000. */
     uint8_t req[8] = { slave, 0x04, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00 };
     uint16_t crc = usMBCRC16(req, 6);
     req[6] = (uint8_t)(crc & 0xFF);   /* Modbus CRC: low byte first */
     req[7] = (uint8_t)(crc >> 8);
 
-    mb_flush_rx();
+    mb_flush_rx(uart);
 
     /*  Drive the RTS/485SEL line around the frame when the port runs in RS-485
         mode. Both helpers are no-ops for TTL/RS-232 and RS-422, and
@@ -109,15 +113,15 @@ int modbus_read_th(uint8_t slave, int16_t *temp, int16_t *hum) {
     uart_rs485_enable();
 #endif
     for (int i = 0; i < 8; i++) {
-        uart_putc_raw(uart1, req[i]);
+        uart_putc_raw(uart, req[i]);
     }
-    uart_tx_wait_blocking(uart1);
+    uart_tx_wait_blocking(uart);
 #ifdef __USE_UART_485_422__
     uart_rs485_disable();
 #endif
 
     uint8_t rsp[MODBUS_RSP_LEN];
-    int n = mb_recv(rsp, MODBUS_RSP_LEN, MODBUS_RSP_TIMEOUT);
+    int n = mb_recv(uart, rsp, MODBUS_RSP_LEN, MODBUS_RSP_TIMEOUT);
     /* DIAG: show what we sent and what (if anything) came back. */
     PRT_INFO("modbus TX: %02X %02X %02X %02X %02X %02X %02X %02X | RX %d bytes: "
              "%02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
@@ -141,9 +145,9 @@ int modbus_read_th(uint8_t slave, int16_t *temp, int16_t *hum) {
 }
 
 void modbusMaster_task(void *argument) {
-    (void)argument;
+    uart_inst_t *uart = (argument != NULL) ? (uart_inst_t *)argument : uart1;
 
-    modbusMaster_init();
+    modbusMaster_init(uart);
 
     /*  Pre-assign a device-bank row per slave so it shows up even before the
         first successful read. */
@@ -156,7 +160,7 @@ void modbusMaster_task(void *argument) {
     while (1) {
         for (uint8_t s = MODBUS_SLAVE_FIRST; s <= MODBUS_SLAVE_LAST; s++) {
             int16_t t = 0, h = 0;
-            int r = modbus_read_th(s, &t, &h);
+            int r = modbus_read_th(uart, s, &t, &h);
             if (r == 0) {
                 device_setValue((uint8_t)(s - 1), 0, t);   /* temperature */
                 device_setValue((uint8_t)(s - 1), 1, h);   /* humidity    */
