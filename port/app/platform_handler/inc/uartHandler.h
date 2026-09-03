@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "port_common.h"
 #include "common.h"
+#include "bufferHandler.h"
 
 //#define _UART_DEBUG_
 
@@ -137,15 +138,13 @@ int32_t platform_uart_putc(uint16_t ch);                    // User Buffer -> UA
 int32_t platform_uart_getc(void);                                 // Ring Buffer -> User
 int32_t platform_uart_getc_nonblk(void);
 int32_t platform_uart_puts(uint8_t* buf, uint16_t bytes);
+/*  Same, on a chosen port: DE line and word length come from that port.
+    platform_uart_puts() is this for UART_ID. */
+int32_t uart_puts_for(uart_inst_t *uart, const uint8_t *buf, uint16_t bytes);
 int32_t platform_uart_gets(uint8_t* buf, uint16_t bytes);
 uint8_t get_byte_from_uart(void);                        // UART Port -> User
 void get_byte_from_uart_it(void);                        // UART Port -> User (global variable for IRQ handler)
-void put_byte_to_data_buffer(uint8_t ch);          // User -> Ring Buffer
-uint16_t get_data_buffer_usedsize(void);
-uint16_t get_data_buffer_freesize(void);
-int8_t is_data_buffer_empty(void);
-int8_t is_data_buffer_full(void);
-void data_buffer_flush(void);
+/*  Ring buffer API lives in bufferHandler.h, which this header includes. */
 uint8_t get_uart_rs485_sel(void);
 void uart_rs485_rs422_init(uint8_t de_pin, uint8_t uart_if_mode);
 void uart_rs485_disable(uart_inst_t *uart, uint8_t de_pin, uint8_t uart_if_mode);
@@ -155,5 +154,13 @@ void uart_rs485_enable(uint8_t de_pin, uint8_t uart_if_mode);
     serial ports to describe. */
 uint8_t uart_de_pin_for(uart_inst_t *uart);
 uint8_t uart_de_mode_for(uart_inst_t *uart);
+
+/*  Data channel (SEG_DATA0_CH / SEG_DATA1_CH) this port fills, so bytes from
+    the two ports never interleave. */
+int uart_channel_for(uart_inst_t *uart);
+
+/*  Application protocol configured for a port (enum protocol). Every module
+    that decides whether it owns a port reads it through here. */
+uint8_t uart_protocol_for(uart_inst_t *uart);
 
 #endif /* UARTHANDLER_H_ */

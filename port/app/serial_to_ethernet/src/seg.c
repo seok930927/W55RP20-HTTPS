@@ -302,7 +302,7 @@ void proc_SEG_udp(uint8_t sock) {
     case SOCK_CLOSED:
         if (serial_mode == SEG_SERIAL_PROTOCOL_NONE) {
             // UART Ring buffer clear
-            data_buffer_flush();
+            data_buffer_flush(SEG_DATA0_CH);
         }
 
         u2e_size = 0;
@@ -399,7 +399,7 @@ void proc_SEG_tcp_client(uint8_t sock) {
             }
 
             if (serial_mode == SEG_SERIAL_PROTOCOL_NONE) {
-                data_buffer_flush();    // UART Ring buffer clear
+                data_buffer_flush(SEG_DATA0_CH);    // UART Ring buffer clear
             }
 
             if (tcp_option->inactivity) {
@@ -567,7 +567,7 @@ void proc_SEG_tcp_client_over_tls(uint8_t sock) {
             }
 
             if (serial_mode == SEG_SERIAL_PROTOCOL_NONE) {
-                data_buffer_flush();    // UART Ring buffer clear
+                data_buffer_flush(SEG_DATA0_CH);    // UART Ring buffer clear
             }
 
             if (tcp_option->inactivity) {
@@ -739,7 +739,7 @@ void proc_SEG_mqtt_client(uint8_t sock) {
             }
 
             if (serial_mode == SEG_SERIAL_PROTOCOL_NONE) {
-                data_buffer_flush();    // UART Ring buffer clear
+                data_buffer_flush(SEG_DATA0_CH);    // UART Ring buffer clear
             }
 
             if (tcp_option->inactivity) {
@@ -922,7 +922,7 @@ void proc_SEG_mqtts_client(uint8_t sock) {
             }
 
             if (serial_mode == SEG_SERIAL_PROTOCOL_NONE) {
-                data_buffer_flush();
+                data_buffer_flush(SEG_DATA0_CH);
             }
 
             if (tcp_option->inactivity) {
@@ -1051,7 +1051,7 @@ void proc_SEG_tcp_server(uint8_t sock) {
             }
 
             if (serial_mode == SEG_SERIAL_PROTOCOL_NONE) {
-                data_buffer_flush();    // UART Ring buffer clear
+                data_buffer_flush(SEG_DATA0_CH);    // UART Ring buffer clear
             }
 
             if (tcp_option->inactivity) {
@@ -1164,7 +1164,7 @@ void proc_SEG_tcp_mixed(uint8_t sock) {
 #ifdef MIXED_CLIENT_LIMITED_CONNECT
                 process_socket_termination(sock, SOCK_TERMINATION_DELAY, FALSE);
                 reconnection_count = 0;
-                data_buffer_flush();
+                data_buffer_flush(SEG_DATA0_CH);
                 mixed_state = MIXED_SERVER;
 #endif
                 return;
@@ -1184,7 +1184,7 @@ void proc_SEG_tcp_mixed(uint8_t sock) {
                 PRT_SEG("reconnection_count >= network_option->tcp_rcr_val\r\n");
                 process_socket_termination(sock, SOCK_TERMINATION_DELAY, FALSE);
                 reconnection_count = 0;
-                data_buffer_flush();
+                data_buffer_flush(SEG_DATA0_CH);
                 mixed_state = MIXED_SERVER;
             }
 #ifdef _SEG_DEBUG_
@@ -1244,7 +1244,7 @@ void proc_SEG_tcp_mixed(uint8_t sock) {
             // Check the connection password auth timer
             if (mixed_state == MIXED_SERVER) {
                 // Connection Password option: TCP server mode only (+ mixed_server)
-                data_buffer_flush();
+                data_buffer_flush(SEG_DATA0_CH);
                 flag_auth_time = SEG_DISABLE;
                 if (tcp_option->pw_connect_en == SEG_ENABLE) {
                     if (seg_auth_timer == NULL) {
@@ -1253,7 +1253,7 @@ void proc_SEG_tcp_mixed(uint8_t sock) {
                     xTimerStart(seg_auth_timer, 0);
                 }
             } else {
-                if (get_data_buffer_usedsize() || u2e_size) {
+                if (get_data_buffer_usedsize(SEG_DATA0_CH) || u2e_size) {
                     xSemaphoreGive(seg_u2e_sem);
                 }
                 mixed_state = MIXED_SERVER;
@@ -1285,7 +1285,7 @@ void proc_SEG_tcp_mixed(uint8_t sock) {
         if (mixed_state == MIXED_SERVER) { // MIXED_SERVER
             u2e_size = 0;
             e2u_size = 0;
-            data_buffer_flush();
+            data_buffer_flush(SEG_DATA0_CH);
 
             int8_t s = socket(sock, Sn_MR_TCP, network_connection->local_port, 0x00);
 
@@ -1424,12 +1424,12 @@ uint16_t get_serial_data(void) {
     uint16_t i;
     uint16_t len;
 
-    len = get_data_buffer_usedsize();
+    len = get_data_buffer_usedsize(SEG_DATA0_CH);
 
     if ((len + u2e_size) >= DATA_BUF_SIZE) { // Avoiding u2e buffer (g_send_buf) overflow
         /* Checking Data packing option: character delimiter */
         if ((serial_data_packing->packing_delimiter[0] != 0x00) && (len == 1)) {
-            g_send_buf[u2e_size] = (uint8_t)data_buffer_getc();
+            g_send_buf[u2e_size] = (uint8_t)data_buffer_getc(SEG_DATA0_CH);
             if (serial_data_packing->packing_delimiter[0] == g_send_buf[u2e_size]) {
                 return u2e_size;
             }
@@ -1444,14 +1444,14 @@ uint16_t get_serial_data(void) {
             (!serial_data_packing->packing_delimiter[0])) { // No Data Packing tiem / size / delimiters.
         // ## 20150427 bugfix: Incorrect serial data storing (UART ring buffer to g_send_buf)
         for (i = 0; i < len; i++) {
-            g_send_buf[u2e_size++] = (uint8_t)data_buffer_getc();
+            g_send_buf[u2e_size++] = (uint8_t)data_buffer_getc(SEG_DATA0_CH);
         }
 
         return u2e_size;
     } else {
         /* Checking Data packing options */
         for (i = 0; i < len; i++) {
-            g_send_buf[u2e_size++] = (uint8_t)data_buffer_getc();
+            g_send_buf[u2e_size++] = (uint8_t)data_buffer_getc(SEG_DATA0_CH);
 
             // Packing delimiter: character option
             if ((serial_data_packing->packing_delimiter[0] != 0x00) &&
@@ -1468,7 +1468,7 @@ uint16_t get_serial_data(void) {
 
     // Packing delimiter: time option
     if ((serial_data_packing->packing_time != 0) && (u2e_size != 0) && (flag_serial_input_time_elapse)) {
-        if (get_data_buffer_usedsize() == 0) {
+        if (get_data_buffer_usedsize(SEG_DATA0_CH) == 0) {
             flag_serial_input_time_elapse = SEG_DISABLE;    // ##
         }
 
@@ -1694,8 +1694,8 @@ void ether_to_spi(uint8_t sock) {
             header[0] = SPI_SLAVE_WRITE_LEN_CMD;
             memcpy(&header[1], &e2u_size, 2);
             header[3] = SPI_DUMMY;
-            memcpy(get_data_buffer_ptr(), header, 4);
-            memcpy(get_data_buffer_ptr() + 4, g_recv_buf, e2u_size);
+            memcpy(get_data_buffer_ptr(SEG_DATA0_CH), header, 4);
+            memcpy(get_data_buffer_ptr(SEG_DATA0_CH) + 4, g_recv_buf, e2u_size);
             xTimerChangePeriod(spi_reset_timer, pdMS_TO_TICKS(period_ms), 0);
             xTimerStart(spi_reset_timer, 0);
             GPIO_Output_Reset(DATA0_SPI_INT_PIN);
@@ -1835,7 +1835,7 @@ void init_trigger_modeswitch(uint8_t mode) {
     }
 
     u2e_size = 0;
-    data_buffer_flush();
+    data_buffer_flush(SEG_DATA0_CH);
     reset_SEG_timeflags();
     //xTimerReset(seg_inactivity_timer, 0);
 }
@@ -1893,7 +1893,7 @@ void restore_serial_data(uint8_t idx) {
     uint8_t i;
 
     for (i = 0; i < idx; i++) {
-        put_byte_to_data_buffer(ch_tmp[i]);
+        put_byte_to_data_buffer(ch_tmp[i], SEG_DATA0_CH);
         ch_tmp[i] = 0x00;
     }
 
@@ -2213,7 +2213,7 @@ void seg_u2e_task(void *argument)  {
         switch (serial_mode) {
         case SEG_SERIAL_PROTOCOL_NONE :
             xSemaphoreTake(seg_critical_sem, portMAX_DELAY);
-            if (get_data_buffer_usedsize() || u2e_size) {
+            if (get_data_buffer_usedsize(SEG_DATA0_CH) || u2e_size) {
                 if ((network_connection->working_mode == TCP_MIXED_MODE) && (mixed_state == MIXED_SERVER) && (ST_OPEN == get_device_status())) {
                     process_socket_termination(SEG_DATA0_SOCK, SOCK_TERMINATION_DELAY, FALSE);
                     mixed_state = MIXED_CLIENT;

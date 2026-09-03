@@ -72,12 +72,12 @@ void on_uart_rx(void) {
         ch = uart_getc(UART_ID);
 
         if (!(check_modeswitch_trigger(ch))) { // ret: [0] data / [!0] trigger code
-            if (is_data_buffer_full() == TRUE) {
-                data_buffer_flush();
+            if (is_data_buffer_full(SEG_DATA0_CH) == TRUE) {
+                data_buffer_flush(SEG_DATA0_CH);
             }
 
             if (check_serial_store_permitted(ch)) { // ret: [0] not permitted / [1] permitted
-                put_byte_to_data_buffer(ch);
+                put_byte_to_data_buffer(ch, SEG_DATA0_CH);
                 input_flag = 1;
             }
         }
@@ -326,37 +326,37 @@ void DATA0_UART_Interrupt_Enable(void) {
 
 void check_uart_flow_control(uint8_t flow_ctrl) {
     if (flow_ctrl == flow_xon_xoff) {
-        if ((xonoff_status == UART_XON) && (get_data_buffer_usedsize() > UART_OFF_THRESHOLD)) { // Send the transmit stop command to peer - go XOFF
+        if ((xonoff_status == UART_XON) && (get_data_buffer_usedsize(SEG_DATA0_CH) > UART_OFF_THRESHOLD)) { // Send the transmit stop command to peer - go XOFF
             platform_uart_putc(UART_XOFF);
             xonoff_status = UART_XOFF;
 #ifdef _UART_DEBUG_
-            printf(" >> SEND XOFF [%d / %d]\r\n", get_data_buffer_usedsize(), SEG_DATA_BUF_SIZE);
+            printf(" >> SEND XOFF [%d / %d]\r\n", get_data_buffer_usedsize(SEG_DATA0_CH), SEG_DATA_BUF_SIZE);
 #endif
-        } else if ((xonoff_status == UART_XOFF) && (get_data_buffer_usedsize() < UART_ON_THRESHOLD)) { // Send the transmit start command to peer. -go XON
+        } else if ((xonoff_status == UART_XOFF) && (get_data_buffer_usedsize(SEG_DATA0_CH) < UART_ON_THRESHOLD)) { // Send the transmit start command to peer. -go XON
             platform_uart_putc(UART_XON);
             xonoff_status = UART_XON;
 #ifdef _UART_DEBUG_
-            printf(" >> SEND XON [%d / %d]\r\n", get_data_buffer_usedsize(), SEG_DATA_BUF_SIZE);
+            printf(" >> SEND XON [%d / %d]\r\n", get_data_buffer_usedsize(SEG_DATA0_CH), SEG_DATA_BUF_SIZE);
 #endif
         }
     }
 #ifdef __USE_GPIO_HARDWARE_FLOWCONTROL__
     else if (flow_ctrl == flow_rts_cts) { // RTS pin control
         // Buffer full occurred
-        if ((rts_status == UART_RTS_LOW) && (get_data_buffer_usedsize() > UART_OFF_THRESHOLD)) {
+        if ((rts_status == UART_RTS_LOW) && (get_data_buffer_usedsize(SEG_DATA0_CH) > UART_OFF_THRESHOLD)) {
             set_uart_rts_pin_high(uartNum);
             rts_status = UART_RTS_HIGH;
 #ifdef _UART_DEBUG_
-            printf(" >> UART_RTS_HIGH [%d / %d]\r\n", get_data_buffer_usedsize(), SEG_DATA_BUF_SIZE);
+            printf(" >> UART_RTS_HIGH [%d / %d]\r\n", get_data_buffer_usedsize(SEG_DATA0_CH), SEG_DATA_BUF_SIZE);
 #endif
         }
 
         // Clear the buffer full event
-        if ((rts_status == UART_RTS_HIGH) && (get_data_buffer_usedsize() <= UART_OFF_THRESHOLD)) {
+        if ((rts_status == UART_RTS_HIGH) && (get_data_buffer_usedsize(SEG_DATA0_CH) <= UART_OFF_THRESHOLD)) {
             set_uart_rts_pin_low(uartNum);
             rts_status = UART_RTS_LOW;
 #ifdef _UART_DEBUG_
-            printf(" >> UART_RTS_LOW [%d / %d]\r\n", get_data_buffer_usedsize(), SEG_DATA_BUF_SIZE);
+            printf(" >> UART_RTS_LOW [%d / %d]\r\n", get_data_buffer_usedsize(SEG_DATA0_CH), SEG_DATA_BUF_SIZE);
 #endif
         }
     }
@@ -379,17 +379,33 @@ int32_t platform_uart_putc(uint16_t ch) {
     return RET_OK;
 }
 
-int32_t platform_uart_puts(uint8_t* buf, uint16_t bytes) {
-    uint32_t i;
+/*  Send `bytes` on `uart`, holding that port's DE line for the whole frame and
+    masking each byte to the word length that port is configured for.
 
-    uart_rs485_enable(uart_de_pin_for(UART_ID), uart_de_mode_for(UART_ID));
+    Raw output: uart_putc() would insert a CR ahead of any byte matching the
+    port's line-feed setting, which corrupts binary protocols. */
+int32_t uart_puts_for(uart_inst_t *uart, const uint8_t *buf, uint16_t bytes) {
+    DevConfig *dev_config = get_DevConfig_pointer();
+    struct __serial_option *serial_option = (uart == uart0)
+                                            ? (struct __serial_option *) & (dev_config->serial_option_485)
+                                            : (struct __serial_option *) & (dev_config->serial_option);
+    uint8_t de_pin = uart_de_pin_for(uart);
+    uint8_t de_mode = uart_de_mode_for(uart);
+    uint8_t mask = (serial_option->data_bits == word_len7) ? 0x7F : 0xFF;
+    uint16_t i;
+
+    uart_rs485_enable(de_pin, de_mode);
     for (i = 0; i < bytes; i++) {
-        platform_uart_putc(buf[i]);
         device_wdt_reset();
+        uart_putc_raw(uart, (char)(buf[i] & mask));
     }
-    uart_rs485_disable(UART_ID, uart_de_pin_for(UART_ID), uart_de_mode_for(UART_ID));
+    uart_rs485_disable(uart, de_pin, de_mode);
 
     return bytes;
+}
+
+int32_t platform_uart_puts(uint8_t* buf, uint16_t bytes) {
+    return uart_puts_for(UART_ID, buf, bytes);
 }
 
 #ifdef __USE_UART_485_422__
@@ -408,6 +424,17 @@ uint8_t uart_de_pin_for(uart_inst_t *uart) {
         return p;
     }
     return (uart == uart0) ? RS485_UART_DE_PIN : DATA0_UART_RTS_PIN;
+}
+
+int uart_channel_for(uart_inst_t *uart) {
+    return (uart == uart0) ? SEG_DATA1_CH : SEG_DATA0_CH;
+}
+
+uint8_t uart_protocol_for(uart_inst_t *uart) {
+    DevConfig *cfg = get_DevConfig_pointer();
+    uint8_t protocol = (uart == uart0) ? cfg->serial_option_485.protocol
+                                       : cfg->serial_option.protocol;
+    return (protocol > sec_ups) ? protocol_none : protocol;
 }
 
 uint8_t uart_de_mode_for(uart_inst_t *uart) {

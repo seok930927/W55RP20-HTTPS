@@ -17,6 +17,13 @@
 
 #define SEG_DATA_BUF_SIZE   4096 // UART Ring buffer size
 
+/*  Data channel index, one RX ring per serial port. Matches the DATA0_UART_*
+    pin macros: channel 0 is the original data port (RP2040 uart1, XR32330),
+    channel 1 is the RS-485 port added later (RP2040 uart0, SP3485EN).
+    The numbering follows those macros, not the RP2040 instance numbers. */
+#define SEG_DATA0_CH        0
+#define SEG_DATA1_CH        1
+
 ///////////////////////////////////////////////////////////////////////////////////////////////////////
 #define SOCK_TERMINATION_DELAY 10 //ms
 

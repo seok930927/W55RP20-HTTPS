@@ -267,9 +267,9 @@ void spi_data_transfer_task(void *argument) {
 
             if (e2u_size) {
                 vTaskEnterCritical();
-                platform_spi_write(get_data_buffer_ptr(), e2u_size + 4);
+                platform_spi_write(get_data_buffer_ptr(SEG_DATA0_CH), e2u_size + 4);
                 vTaskExitCritical();
-                //platform_spi_write_dma(get_data_buffer_ptr(), e2u_size + 4);
+                //platform_spi_write_dma(get_data_buffer_ptr(SEG_DATA0_CH), e2u_size + 4);
                 e2u_size = 0;
                 current_state = STATE_COMMAND;
                 irq_set_enabled(SPI0_IRQ, true);

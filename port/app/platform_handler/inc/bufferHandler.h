@@ -45,15 +45,18 @@
 
 #define BUFFER_PTR(_name) _name##_buf
 
-void data_buffer_flush(void);
-void put_byte_to_data_buffer(uint8_t ch);
-uint16_t get_data_buffer_usedsize(void);
-uint16_t get_data_buffer_freesize(void);
-uint8_t *get_data_buffer_ptr(void);
-int8_t is_data_buffer_empty(void);
-int8_t is_data_buffer_full(void);
-int32_t data_buffer_getc(void);
-int32_t data_buffer_getc_nonblk(void);
-int32_t data_buffer_gets(uint8_t* buf, uint16_t bytes);
+/*  One RX ring per serial port. `channel` is SEG_DATA0_CH / SEG_DATA1_CH
+    from seg.h. Signatures match the upstream W55RP20-S2E 2Port branch so the
+    two trees stay comparable. */
+void data_buffer_flush(int channel);
+void put_byte_to_data_buffer(uint8_t ch, int channel);
+uint16_t get_data_buffer_usedsize(int channel);
+uint16_t get_data_buffer_freesize(int channel);
+uint8_t *get_data_buffer_ptr(int channel);
+int8_t is_data_buffer_empty(int channel);
+int8_t is_data_buffer_full(int channel);
+int32_t data_buffer_getc(int channel);
+int32_t data_buffer_getc_nonblk(int channel);
+int32_t data_buffer_gets(uint8_t* buf, uint16_t bytes, int channel);
 
 #endif /* BUFFERHANDLER_H_ */

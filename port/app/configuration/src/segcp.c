@@ -486,7 +486,7 @@ uint16_t proc_SEGCP(uint8_t* segcp_req, uint8_t* segcp_rep, uint8_t segcp_privil
 #endif
                     break;
                 case SEGCP_RX:
-                    data_buffer_flush();
+                    data_buffer_flush(SEG_DATA0_CH);
                     sprintf(trep, "%s", "FLUSH");
                     break;
                 case SEGCP_SV:
@@ -1401,7 +1401,7 @@ uint16_t proc_SEGCP(uint8_t* segcp_req, uint8_t* segcp_rep, uint8_t segcp_privil
 #ifdef DBG_LEVEL_SEGCP
                 PRT_SEGCP("ERROR : %s\r\n", trep);
 #endif
-                data_buffer_flush();
+                data_buffer_flush(SEG_DATA0_CH);
                 return ret;
             }
         }
@@ -1613,13 +1613,13 @@ uint16_t proc_SEGCP_serial(uint8_t * segcp_req, uint8_t * segcp_rep) {
                 printf("%s", segcp_rep);
             }
 
-            memcpy(get_data_buffer_ptr(), header, 4);
-            memcpy(get_data_buffer_ptr() + 4, segcp_rep, len);
+            memcpy(get_data_buffer_ptr(SEG_DATA0_CH), header, 4);
+            memcpy(get_data_buffer_ptr(SEG_DATA0_CH) + 4, segcp_rep, len);
 
             GPIO_Output_Reset(DATA0_SPI_INT_PIN);
-            //platform_spi_write_dma(get_data_buffer_ptr(), len+4);
+            //platform_spi_write_dma(get_data_buffer_ptr(SEG_DATA0_CH), len+4);
             vTaskEnterCritical();
-            platform_spi_write(get_data_buffer_ptr(), len + 4);
+            platform_spi_write(get_data_buffer_ptr(SEG_DATA0_CH), len + 4);
             vTaskExitCritical();
             irq_set_enabled(SPI0_IRQ, true);
             GPIO_Output_Set(DATA0_SPI_INT_PIN);
@@ -1628,7 +1628,7 @@ uint16_t proc_SEGCP_serial(uint8_t * segcp_req, uint8_t * segcp_rep) {
             irq_set_enabled(SPI0_IRQ, true);
         }
     } else {
-        if (get_data_buffer_usedsize()) {
+        if (get_data_buffer_usedsize(SEG_DATA0_CH)) {
             len = uart_get_commandline(segcp_req, CONFIG_BUF_SIZE);
             if (len != 0) {
                 segcp_privilege = SEGCP_PRIVILEGE_SET | SEGCP_PRIVILEGE_WRITE;
@@ -1649,12 +1649,12 @@ uint16_t uart_get_commandline(uint8_t* buf, uint16_t maxSize) {
     DevConfig *dev_config = get_DevConfig_pointer();
 
     uint16_t i;
-    uint16_t len = get_data_buffer_usedsize();
+    uint16_t len = get_data_buffer_usedsize(SEG_DATA0_CH);
 
     if (len >= 4) { // Minimum of command: 4-bytes, e.g., MC\r\n (MC$0d$0a)
         memset(buf, 0, CONFIG_BUF_SIZE);
         for (i = 0; i < maxSize; i++) {
-            buf[i] = data_buffer_getc();
+            buf[i] = data_buffer_getc(SEG_DATA0_CH);
             if (buf[i] == 0x0a) {
                 break;    // [0x0a]: end of command (Line feed)
             }
@@ -1662,19 +1662,19 @@ uint16_t uart_get_commandline(uint8_t* buf, uint16_t maxSize) {
 
         if ((!(memcmp(buf, "OC", SEGCP_CMD_MAX))) || (!(memcmp(buf, "LC", SEGCP_CMD_MAX)))) {
             for (i++; i < maxSize; i++) {
-                buf[i] = data_buffer_getc();
+                buf[i] = data_buffer_getc(SEG_DATA0_CH);
                 if (strstr(buf, END_CERT)) {
                     vTaskDelay(10);
-                    data_buffer_flush();
+                    data_buffer_flush(SEG_DATA0_CH);
                     break;
                 }
             }
         } else if (!(memcmp(buf, "PK", SEGCP_CMD_MAX))) {
             for (i++; i < maxSize; i++) {
-                buf[i] = data_buffer_getc();
+                buf[i] = data_buffer_getc(SEG_DATA0_CH);
                 if (strstr(buf, END_PKEY)) {
                     delay_ms(10);
-                    data_buffer_flush();
+                    data_buffer_flush(SEG_DATA0_CH);
                     break;
                 }
             }

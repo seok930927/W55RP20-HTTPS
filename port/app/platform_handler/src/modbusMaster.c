@@ -12,7 +12,7 @@
 #include "sensor.h"             /* device_assign, device_setValue            */
 #include "ConfigData.h"         /* get_DevConfig_pointer, serial_option_485   */
 #include "uartHandler.h"        /* baud_table, word_len/parity/stop enums     */
-#include "WIZnet_board.h"       /* RS485_UART_TX/RX/DE_PIN                     */
+#include "WIZnet_board.h"       /* board pin macros (via uartHandler)           */
 #include "WIZ5XXSR-RP_Debug.h"  /* PRT_INFO                                    */
 
 /*  CRC-16 (Modbus) — defined in the bundled modbus lib (mbcrc.c), linked via
@@ -27,6 +27,12 @@ extern uint32_t baud_table[];
     Raise MODBUS_SLAVE_LAST as more modules are wired. */
 #define MODBUS_SLAVE_FIRST   1
 #define MODBUS_SLAVE_LAST    4
+
+/*  Device-bank row each port starts at. Both ports polling at once would
+    otherwise write the same rows; uart1 keeps row 0 so existing SNMP index
+    mappings do not move. */
+#define MODBUS_BANK_BASE_UART1   0
+#define MODBUS_BANK_BASE_UART0   32
 
 #define MODBUS_RSP_LEN       9      /* slave,func,bytecount,temp(2),hum(2),crc(2) */
 #define MODBUS_RSP_TIMEOUT   150    /* ms to wait for a full response frame      */
@@ -130,6 +136,7 @@ int modbus_read_th(uart_inst_t *uart, uint8_t slave, int16_t *temp, int16_t *hum
 
 void modbusMaster_task(void *argument) {
     uart_inst_t *uart = (argument != NULL) ? (uart_inst_t *)argument : uart1;
+    uint8_t base = (uart == uart0) ? MODBUS_BANK_BASE_UART0 : MODBUS_BANK_BASE_UART1;
 
     modbusMaster_init(uart);
 
@@ -138,7 +145,7 @@ void modbusMaster_task(void *argument) {
     for (uint8_t s = MODBUS_SLAVE_FIRST; s <= MODBUS_SLAVE_LAST; s++) {
         char name[DEVICE_NAME_MAX];
         snprintf(name, sizeof(name), "TH-%u", s);
-        device_assign((uint8_t)(s - 1), name);
+        device_assign((uint8_t)(base + s - 1), name);
     }
 
     while (1) {
@@ -146,8 +153,8 @@ void modbusMaster_task(void *argument) {
             int16_t t = 0, h = 0;
             int r = modbus_read_th(uart, s, &t, &h);
             if (r == 0) {
-                device_setValue((uint8_t)(s - 1), 0, t);   /* temperature */
-                device_setValue((uint8_t)(s - 1), 1, h);   /* humidity    */
+                device_setValue((uint8_t)(base + s - 1), 0, t);   /* temperature */
+                device_setValue((uint8_t)(base + s - 1), 1, h);   /* humidity    */
                 PRT_INFO("modbusMaster: slave %u  T=%d (%.1fC)  H=%d (%.1f%%)\r\n",
                          s, t, t / 10.0, h, h / 10.0);
             } else {

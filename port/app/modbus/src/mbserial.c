@@ -10,6 +10,8 @@
 #include "mbrtu.h"
 #include "mbascii.h"
 
+#include "seg.h"
+
 BUFFER_DECLARATION(data0_serial_rx);
 
 /*****************************************************************************
@@ -22,7 +24,7 @@ BUFFER_DECLARATION(data0_serial_rx);
 */
 
 int UART_read(void *data, int bytes) {
-    return data_buffer_gets(data, bytes);
+    return data_buffer_gets(data, bytes, SEG_DATA0_CH);
 }
 
 uint32_t UART_write(void *data, int bytes) {
