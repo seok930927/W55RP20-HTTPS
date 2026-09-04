@@ -54,6 +54,9 @@
 #define SEGCP_TCP_TASK_STACK_SIZE 1024
 #define SEGCP_TCP_TASK_PRIORITY 51
 
+#define SEGCP_SERIAL_TASK_STACK_SIZE 1024
+#define SEGCP_SERIAL_TASK_PRIORITY 50
+
 #define SENSOR_UART_TASK_STACK_SIZE 1024
 #define SENSOR_UART_TASK_PRIORITY 9
 
@@ -289,6 +292,7 @@ void start_task(void *argument) {
     xTaskCreate(snmp_agent_task, "SNMP_Agent_Task", SNMP_TASK_STACK_SIZE, NULL, SNMP_TASK_PRIORITY, NULL);
     xTaskCreate(segcp_udp_task, "SEGCP_udp_Task", SEGCP_UDP_TASK_STACK_SIZE, NULL, SEGCP_UDP_TASK_PRIORITY, NULL);
     xTaskCreate(segcp_tcp_task, "SEGCP_tcp_Task", SEGCP_TCP_TASK_STACK_SIZE, NULL, SEGCP_TCP_TASK_PRIORITY, NULL);
+    xTaskCreate(segcp_serial_task, "SEGCP_serial_Task", SEGCP_SERIAL_TASK_STACK_SIZE, NULL, SEGCP_SERIAL_TASK_PRIORITY, NULL);
     xTaskCreate(sensorUart_task, "Sensor_UART_Task", SENSOR_UART_TASK_STACK_SIZE, NULL, SENSOR_UART_TASK_PRIORITY, NULL);
     for (uint8_t p = 0; p < SERIAL_PORT_CNT; p++) {
         if (g_serial_port[p].protocol != modbus_rtu) {

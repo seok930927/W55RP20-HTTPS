@@ -143,6 +143,14 @@ void serial_port_init_all(void);
 int32_t serial_port_putc(SerialPort *port, uint16_t ch);
 int32_t serial_port_puts(SerialPort *port, const uint8_t *buf, uint16_t bytes);
 
+/*  Take one byte off that port, or RET_NOK when nothing is waiting.
+
+    Every receive path goes through here, so the serial command escape is seen
+    below the protocol handlers and works whether the port is running S/T/R,
+    Modbus or anything added later. A byte held as part of the escape reads as
+    RET_NOK: the caller must not treat it as protocol data. */
+int32_t serial_port_getc(SerialPort *port);
+
 /*  Direction line around a frame the caller writes itself. No-ops unless the
     port runs an RS-485 mode; tx_disable() waits for the shift register first. */
 void serial_port_tx_enable(SerialPort *port);

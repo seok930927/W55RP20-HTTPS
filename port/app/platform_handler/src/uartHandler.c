@@ -420,6 +420,24 @@ int32_t platform_uart_putc(uint16_t ch) {
 
     Raw output: uart_putc() would insert a CR ahead of any byte matching the
     port's line-feed setting, which corrupts binary protocols. */
+/*  The escape state in seg.c is a single instance for the whole device, and a
+    failed sequence is put back on channel 0, so only channel 0 may watch for
+    it. That is the config port, which is where it belongs. */
+int32_t serial_port_getc(SerialPort *port) {
+    int32_t ch;
+
+    if (!uart_is_readable(port->uart)) {
+        return RET_NOK;
+    }
+    ch = (int32_t)uart_getc(port->uart);
+
+    if ((port->channel == SEG_DATA0_CH) && check_modeswitch_trigger((uint8_t)ch)) {
+        return RET_NOK;   /* held as a possible escape, not protocol data */
+    }
+
+    return ch;
+}
+
 int32_t serial_port_puts(SerialPort *port, const uint8_t *buf, uint16_t bytes) {
     uint8_t mask = (port->opt->data_bits == word_len7) ? 0x7F : 0xFF;
     uint16_t i;

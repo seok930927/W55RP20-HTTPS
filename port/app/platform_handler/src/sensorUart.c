@@ -25,6 +25,8 @@
 #define UART_LINE_BUF_SIZE  64
 
 
+extern xSemaphoreHandle segcp_uart_sem;   /* AT command mode wake-up */
+
 static SemaphoreHandle_t s_uart_sem = NULL;
 
 volatile uint32_t dbg_rs232_isr_cnt = 0;
@@ -52,12 +54,25 @@ volatile uint32_t dbg_rs485_isr_cnt = 0;
 static void sensorUart_rs232_rx_isr(void) {
     dbg_rs232_isr_cnt++;
     BaseType_t higher = pdFALSE;
-    int channel = g_serial_port[SEG_DATA0_CH].channel;
-    while (uart_is_readable(UART_ID)) {
-        uint8_t ch = uart_getc(UART_ID);
-        if (!is_data_buffer_full(channel)) {
-            put_byte_to_data_buffer(ch, channel);
+    SerialPort *port = &g_serial_port[SEG_DATA0_CH];
+
+    while (uart_is_readable(port->uart)) {
+        int32_t ch = serial_port_getc(port);
+        if (ch == RET_NOK) {
+            continue;   /* the escape watcher held on to it */
         }
+        if (!is_data_buffer_full(port->channel)) {
+            put_byte_to_data_buffer((uint8_t)ch, port->channel);
+        }
+    }
+
+    /*  In command mode these bytes are AT commands, not S/T/R. */
+    if (opmode == DEVICE_AT_MODE) {
+        if (segcp_uart_sem != NULL) {
+            xSemaphoreGiveFromISR(segcp_uart_sem, &higher);
+            portYIELD_FROM_ISR(higher);
+        }
+        return;
     }
     if (s_uart_sem != NULL) {
         xSemaphoreGiveFromISR(s_uart_sem, &higher);
@@ -73,11 +88,15 @@ static void sensorUart_rs485_rx_isr(void) {
     dbg_rs485_isr_cnt++;
     gpio_xor_mask(1u << 19);   /* LED3 toggle: visual proof ISR is firing */
     BaseType_t higher = pdFALSE;
-    int channel = g_serial_port[SEG_DATA1_CH].channel;
-    while (uart_is_readable(uart0)) {
-        uint8_t ch = uart_getc(uart0);
-        if (!is_data_buffer_full(channel)) {
-            put_byte_to_data_buffer(ch, channel);
+    SerialPort *port = &g_serial_port[SEG_DATA1_CH];
+
+    while (uart_is_readable(port->uart)) {
+        int32_t ch = serial_port_getc(port);
+        if (ch == RET_NOK) {
+            continue;
+        }
+        if (!is_data_buffer_full(port->channel)) {
+            put_byte_to_data_buffer((uint8_t)ch, port->channel);
         }
     }
     if (s_uart_sem != NULL) {

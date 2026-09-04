@@ -58,19 +58,20 @@ void modbusMaster_init(SerialPort *port) {
 }
 
 /* Drain the RX FIFO of any stale bytes before a transaction. */
-static void mb_flush_rx(uart_inst_t *uart) {
-    while (uart_is_readable(uart)) {
-        (void)uart_getc(uart);
+static void mb_flush_rx(SerialPort *port) {
+    while (uart_is_readable(port->uart)) {
+        (void)serial_port_getc(port);
     }
 }
 
 /* Read up to `want` bytes within `timeout_ms`. Returns the number received. */
-static int mb_recv(uart_inst_t *uart, uint8_t *buf, int want, uint32_t timeout_ms) {
+static int mb_recv(SerialPort *port, uint8_t *buf, int want, uint32_t timeout_ms) {
     TickType_t start = xTaskGetTickCount();
     int got = 0;
     while (got < want) {
-        while (got < want && uart_is_readable(uart)) {
-            buf[got++] = (uint8_t)uart_getc(uart);
+        int32_t ch;
+        while (got < want && (ch = serial_port_getc(port)) != RET_NOK) {
+            buf[got++] = (uint8_t)ch;
         }
         if (got >= want) {
             break;
@@ -91,7 +92,7 @@ int modbus_read_th(SerialPort *port, uint8_t slave, int16_t *temp, int16_t *hum)
     req[6] = (uint8_t)(crc & 0xFF);   /* Modbus CRC: low byte first */
     req[7] = (uint8_t)(crc >> 8);
 
-    mb_flush_rx(uart);
+    mb_flush_rx(port);
 
     /*  Drive the RTS/485SEL line around the frame when the port runs in RS-485
         mode. Both helpers are no-ops for TTL/RS-232 and RS-422, and
@@ -109,7 +110,7 @@ int modbus_read_th(SerialPort *port, uint8_t slave, int16_t *temp, int16_t *hum)
 #endif
 
     uint8_t rsp[MODBUS_RSP_LEN];
-    int n = mb_recv(uart, rsp, MODBUS_RSP_LEN, MODBUS_RSP_TIMEOUT);
+    int n = mb_recv(port, rsp, MODBUS_RSP_LEN, MODBUS_RSP_TIMEOUT);
     /* DIAG: show what we sent and what (if anything) came back. */
     PRT_INFO("modbus TX: %02X %02X %02X %02X %02X %02X %02X %02X | RX %d bytes: "
              "%02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
@@ -149,6 +150,12 @@ void modbusMaster_task(void *argument) {
     }
 
     while (1) {
+        /*  Command mode owns the config port while it lasts; polling would
+            fight segcp for the same FIFO. */
+        if ((port->channel == SEG_DATA0_CH) && (opmode == DEVICE_AT_MODE)) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+            continue;
+        }
         for (uint8_t s = MODBUS_SLAVE_FIRST; s <= MODBUS_SLAVE_LAST; s++) {
             int16_t t = 0, h = 0;
             int r = modbus_read_th(port, s, &t, &h);
