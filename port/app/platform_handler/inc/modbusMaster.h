@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "hardware/uart.h"
+#include "uartHandler.h"   /* SerialPort */
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,15 +26,15 @@ extern "C" {
 
 /*  Configure `uart` for Modbus: baud/format from the matching serial_option.
     No DE pin, no RX IRQ. The master polls synchronously. */
-void modbusMaster_init(uart_inst_t *uart);
+void modbusMaster_init(SerialPort *port);
 
 /*  Poll one slave for temperature + humidity.
     Returns 0 on success (fills *temp/*hum), negative on error:
       -1 timeout / short frame, -2 CRC error, -3 unexpected header. */
-int modbus_read_th(uart_inst_t *uart, uint8_t slave, int16_t *temp, int16_t *hum);
+int modbus_read_th(SerialPort *port, uint8_t slave, int16_t *temp, int16_t *hum);
 
 /*  FreeRTOS task: periodically polls the configured slave range and writes
-    results into the device bank. Pass pvParameters = the uart_inst_t * to use. */
+    results into the device bank. Pass pvParameters = the SerialPort * to poll. */
 void modbusMaster_task(void *argument);
 
 #ifdef __cplusplus

@@ -1576,11 +1576,11 @@ void ether_to_uart(uint8_t sock) {
                     debugSerial_dataTransfer(g_recv_buf, e2u_size, SEG_DEBUG_E2S);
                 }
 
-                uart_rs485_enable(uart_de_pin_for(UART_ID), serial_option->uart_interface);
+                serial_port_tx_enable(&g_serial_port[SEG_DATA0_CH]);
                 for (i = 0; i < e2u_size; i++) {
                     platform_uart_putc(g_recv_buf[i]);
                 }
-                uart_rs485_disable(UART_ID, uart_de_pin_for(UART_ID), serial_option->uart_interface);
+                serial_port_tx_disable(&g_serial_port[SEG_DATA0_CH]);
 
                 e2u_size = 0;
             }

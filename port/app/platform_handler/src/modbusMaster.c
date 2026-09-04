@@ -9,6 +9,7 @@
 #include "task.h"
 
 #include "modbusMaster.h"
+#include "seg.h"           /* SEG_DATA0_CH / SEG_DATA1_CH */
 #include "sensor.h"             /* device_assign, device_setValue            */
 #include "ConfigData.h"         /* get_DevConfig_pointer, serial_option_485   */
 #include "uartHandler.h"        /* baud_table, word_len/parity/stop enums     */
@@ -29,10 +30,10 @@ extern uint32_t baud_table[];
 #define MODBUS_SLAVE_LAST    4
 
 /*  Device-bank row each port starts at. Both ports polling at once would
-    otherwise write the same rows; uart1 keeps row 0 so existing SNMP index
+    otherwise write the same rows; channel 0 keeps row 0 so existing SNMP index
     mappings do not move. */
-#define MODBUS_BANK_BASE_UART1   0
-#define MODBUS_BANK_BASE_UART0   32
+#define MODBUS_BANK_BASE_CH0     0
+#define MODBUS_BANK_BASE_CH1     32
 
 #define MODBUS_RSP_LEN       9      /* slave,func,bytecount,temp(2),hum(2),crc(2) */
 #define MODBUS_RSP_TIMEOUT   150    /* ms to wait for a full response frame      */
@@ -41,17 +42,15 @@ extern uint32_t baud_table[];
 /*  Configure `uart` for Modbus. baud/format come from that port's serial_option
     so the web serial settings apply (sensor default is 9600 8N1 — set Baud=9600).
     No RX IRQ: the master drains the RX FIFO itself. */
-void modbusMaster_init(uart_inst_t *uart) {
-    DevConfig *cfg = get_DevConfig_pointer();
-    struct __serial_option *opt = (uart == uart0)
-                                  ? &cfg->serial_option_485
-                                  : &cfg->serial_option;
+void modbusMaster_init(SerialPort *port) {
+    struct __serial_option *opt;
 
-    uart_port_configuration(uart);
-    uart_set_hw_flow(uart, false, false);   /* Modbus RTU never uses RTS/CTS */
+    serial_port_setup(port);
+    uart_set_hw_flow(port->uart, false, false);   /* Modbus RTU never uses RTS/CTS */
+    opt = port->opt;
 
-    PRT_INFO("modbusMaster: master ready (uart%u, %lu-%u-%s-%u)\r\n",
-             (uart == uart0) ? 0u : 1u,
+    PRT_INFO("modbusMaster: master ready (ch%d, %lu-%u-%s-%u)\r\n",
+             port->channel,
              (unsigned long)baud_table[opt->baud_rate < baud_max ? opt->baud_rate : baud_115200],
              (opt->data_bits == word_len7) ? 7 : 8,
              parity_table[opt->parity <= parity_mark ? opt->parity : parity_none],
@@ -84,7 +83,8 @@ static int mb_recv(uart_inst_t *uart, uint8_t *buf, int want, uint32_t timeout_m
     return got;
 }
 
-int modbus_read_th(uart_inst_t *uart, uint8_t slave, int16_t *temp, int16_t *hum) {
+int modbus_read_th(SerialPort *port, uint8_t slave, int16_t *temp, int16_t *hum) {
+    uart_inst_t *uart = port->uart;
     /* Request: read 2 input registers (Func 04) from address 0x0000. */
     uint8_t req[8] = { slave, 0x04, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00 };
     uint16_t crc = usMBCRC16(req, 6);
@@ -95,19 +95,17 @@ int modbus_read_th(uart_inst_t *uart, uint8_t slave, int16_t *temp, int16_t *hum
 
     /*  Drive the RTS/485SEL line around the frame when the port runs in RS-485
         mode. Both helpers are no-ops for TTL/RS-232 and RS-422, and
-        uart_rs485_disable() waits for the shift register to drain before it
+        serial_port_tx_disable() waits for the shift register to drain before it
         releases the bus, so the slave never sees a truncated frame. */
 #ifdef __USE_UART_485_422__
-    uint8_t de_pin = uart_de_pin_for(uart);
-    uint8_t de_mode = uart_de_mode_for(uart);
-    uart_rs485_enable(de_pin, de_mode);
+    serial_port_tx_enable(port);
 #endif
     for (int i = 0; i < 8; i++) {
         uart_putc_raw(uart, req[i]);
     }
     uart_tx_wait_blocking(uart);
 #ifdef __USE_UART_485_422__
-    uart_rs485_disable(uart, de_pin, de_mode);
+    serial_port_tx_disable(port);
 #endif
 
     uint8_t rsp[MODBUS_RSP_LEN];
@@ -135,10 +133,12 @@ int modbus_read_th(uart_inst_t *uart, uint8_t slave, int16_t *temp, int16_t *hum
 }
 
 void modbusMaster_task(void *argument) {
-    uart_inst_t *uart = (argument != NULL) ? (uart_inst_t *)argument : uart1;
-    uint8_t base = (uart == uart0) ? MODBUS_BANK_BASE_UART0 : MODBUS_BANK_BASE_UART1;
+    SerialPort *port = (argument != NULL) ? (SerialPort *)argument
+                                          : &g_serial_port[SEG_DATA0_CH];
+    uint8_t base = (port->channel == SEG_DATA0_CH)
+                   ? MODBUS_BANK_BASE_CH0 : MODBUS_BANK_BASE_CH1;
 
-    modbusMaster_init(uart);
+    modbusMaster_init(port);
 
     /*  Pre-assign a device-bank row per slave so it shows up even before the
         first successful read. */
@@ -151,7 +151,7 @@ void modbusMaster_task(void *argument) {
     while (1) {
         for (uint8_t s = MODBUS_SLAVE_FIRST; s <= MODBUS_SLAVE_LAST; s++) {
             int16_t t = 0, h = 0;
-            int r = modbus_read_th(uart, s, &t, &h);
+            int r = modbus_read_th(port, s, &t, &h);
             if (r == 0) {
                 device_setValue((uint8_t)(base + s - 1), 0, t);   /* temperature */
                 device_setValue((uint8_t)(base + s - 1), 1, h);   /* humidity    */

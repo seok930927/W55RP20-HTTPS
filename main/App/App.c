@@ -225,7 +225,7 @@ void start_task(void *argument) {
     load_DevConfig_from_storage();
     RP2040_Board_Init();
     set_minimal_runtime_config();
-    DATA0_UART_Configuration();   /* UART must be ready before check_mac_address() */
+    serial_port_init_all();   /* both ports ready before check_mac_address() */
     check_mac_address();
 
     Net_Conf();
@@ -241,12 +241,9 @@ void start_task(void *argument) {
     /*  Serial ports, in bank order. Each one carries its own protocol setting;
         the Modbus poller takes the ports set to Modbus RTU and sensorUart
         claims the rest. */
-    uart_inst_t *const serial_port[] = { uart0, uart1 };
-    const uint8_t serial_port_count = (uint8_t)(sizeof(serial_port) / sizeof(serial_port[0]));
-
-    for (uint8_t p = 0; p < serial_port_count; p++) {
-        printf("=== uart%u protocol=%u (1=Modbus poller ON) ===\r\n",
-               p, uart_protocol_for(serial_port[p]));
+    for (uint8_t p = 0; p < SERIAL_PORT_CNT; p++) {
+        printf("=== ch%u protocol=%u (1=Modbus poller ON) ===\r\n",
+               p, g_serial_port[p].protocol);
     }
 
     /*  Demo entries matching the reference capture (온습도센서화면전송.pptx).
@@ -293,14 +290,14 @@ void start_task(void *argument) {
     xTaskCreate(segcp_udp_task, "SEGCP_udp_Task", SEGCP_UDP_TASK_STACK_SIZE, NULL, SEGCP_UDP_TASK_PRIORITY, NULL);
     xTaskCreate(segcp_tcp_task, "SEGCP_tcp_Task", SEGCP_TCP_TASK_STACK_SIZE, NULL, SEGCP_TCP_TASK_PRIORITY, NULL);
     xTaskCreate(sensorUart_task, "Sensor_UART_Task", SENSOR_UART_TASK_STACK_SIZE, NULL, SENSOR_UART_TASK_PRIORITY, NULL);
-    for (uint8_t p = 0; p < serial_port_count; p++) {
-        if (uart_protocol_for(serial_port[p]) != modbus_rtu) {
+    for (uint8_t p = 0; p < SERIAL_PORT_CNT; p++) {
+        if (g_serial_port[p].protocol != modbus_rtu) {
             continue;
         }
         char task_name[configMAX_TASK_NAME_LEN];
-        snprintf(task_name, sizeof(task_name), "Modbus_uart%u", p);
+        snprintf(task_name, sizeof(task_name), "Modbus_ch%u", p);
         xTaskCreate(modbusMaster_task, task_name, MODBUS_MASTER_TASK_STACK_SIZE,
-                    serial_port[p], MODBUS_MASTER_TASK_PRIORITY, NULL);
+                    &g_serial_port[p], MODBUS_MASTER_TASK_PRIORITY, NULL);
     }
     // xTaskCreate(heap_monitor_task, "Heap_Monitor_Task", HEAP_MONITOR_TASK_STACK_SIZE, NULL, HEAP_MONITOR_TASK_PRIORITY, NULL);
 #ifdef __USE_WATCHDOG__

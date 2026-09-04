@@ -102,6 +102,52 @@ enum protocol {
     sec_ups = 3
 };
 
+/*  A serial port, as this firmware uses one.
+
+    Board wiring (uart, irq, channel, pins) is fixed in the g_serial_port table.
+    serial_port_setup() fills in the rest from that port's settings block, so
+    everything a caller needs about a port is reachable from one pointer and no
+    call has to ask "which port is this" again. */
+#define SERIAL_PORT_CNT     2
+#define SERIAL_PIN_NONE     0xFF
+
+typedef struct __serial_port {
+    /* board wiring — constant */
+    uart_inst_t            *uart;         /* uart0 / uart1                    */
+    uint8_t                 irq;          /* UART0_IRQ / UART1_IRQ            */
+    int                     channel;      /* SEG_DATA0_CH / SEG_DATA1_CH      */
+    uint8_t                 tx_pin, rx_pin;
+    uint8_t                 cts_pin, rts_pin;   /* SERIAL_PIN_NONE if absent  */
+    uint8_t                 de_pin_board; /* DE/nRE this board routes         */
+    /* resolved by serial_port_setup() — from the stored settings */
+    uint8_t                 de_pin;       /* configured DE, else de_pin_board */
+    uint8_t                 intf;         /* TTL / RS-422 / RS-485 / reverse  */
+    uint8_t                 protocol;     /* enum protocol                    */
+    struct __serial_option *opt;          /* that port's settings block       */
+} SerialPort;
+
+extern SerialPort g_serial_port[SERIAL_PORT_CNT];
+
+/*  Bring the port up from its settings and fill in the resolved fields.
+    Safe to call more than once. */
+void serial_port_setup(SerialPort *port);
+
+/*  Bring every port up once, before anything transmits. Until a port has been
+    through setup its opt pointer is still NULL, so this has to run before the
+    first serial_port_puts(). */
+void serial_port_init_all(void);
+
+/*  Send on that port. serial_port_puts() holds DE for the whole frame and
+    masks each byte to the port's word length; it writes raw, so binary
+    protocol frames pass through untouched. */
+int32_t serial_port_putc(SerialPort *port, uint16_t ch);
+int32_t serial_port_puts(SerialPort *port, const uint8_t *buf, uint16_t bytes);
+
+/*  Direction line around a frame the caller writes itself. No-ops unless the
+    port runs an RS-485 mode; tx_disable() waits for the shift register first. */
+void serial_port_tx_enable(SerialPort *port);
+void serial_port_tx_disable(SerialPort *port);
+
 extern uint32_t baud_table[];
 extern uint8_t word_len_table[];
 extern uint8_t stop_bit_table[];
@@ -117,9 +163,6 @@ void uart_set_format_parity(uart_inst_t *uart, uint8_t data_bits, uint8_t stop_b
 void on_uart_rx(void);
 void DEBUG_UART_Configuration(void);
 void DATA0_UART_Configuration(void);
-/*  Bring a port up from its own serial_option block (uart0 reads
-    serial_option_485). DATA0_UART_Configuration() is this for UART_ID. */
-void uart_port_configuration(uart_inst_t *uart);
 void DATA0_UART_Deinit(void);
 void DATA0_UART_Interrupt_Enable(void);
 void DATA1_UART_Configuration(void);
@@ -138,29 +181,10 @@ int32_t platform_uart_putc(uint16_t ch);                    // User Buffer -> UA
 int32_t platform_uart_getc(void);                                 // Ring Buffer -> User
 int32_t platform_uart_getc_nonblk(void);
 int32_t platform_uart_puts(uint8_t* buf, uint16_t bytes);
-/*  Same, on a chosen port: DE line and word length come from that port.
-    platform_uart_puts() is this for UART_ID. */
-int32_t uart_puts_for(uart_inst_t *uart, const uint8_t *buf, uint16_t bytes);
 int32_t platform_uart_gets(uint8_t* buf, uint16_t bytes);
 uint8_t get_byte_from_uart(void);                        // UART Port -> User
 void get_byte_from_uart_it(void);                        // UART Port -> User (global variable for IRQ handler)
 /*  Ring buffer API lives in bufferHandler.h, which this header includes. */
 uint8_t get_uart_rs485_sel(void);
-void uart_rs485_rs422_init(uint8_t de_pin, uint8_t uart_if_mode);
-void uart_rs485_disable(uart_inst_t *uart, uint8_t de_pin, uint8_t uart_if_mode);
-void uart_rs485_enable(uint8_t de_pin, uint8_t uart_if_mode);
-
-/*  DE pin / line-driver mode for a port. `uart` selects which of the two
-    serial ports to describe. */
-uint8_t uart_de_pin_for(uart_inst_t *uart);
-uint8_t uart_de_mode_for(uart_inst_t *uart);
-
-/*  Data channel (SEG_DATA0_CH / SEG_DATA1_CH) this port fills, so bytes from
-    the two ports never interleave. */
-int uart_channel_for(uart_inst_t *uart);
-
-/*  Application protocol configured for a port (enum protocol). Every module
-    that decides whether it owns a port reads it through here. */
-uint8_t uart_protocol_for(uart_inst_t *uart);
 
 #endif /* UARTHANDLER_H_ */

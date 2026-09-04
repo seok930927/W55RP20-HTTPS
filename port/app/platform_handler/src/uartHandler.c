@@ -18,6 +18,7 @@
 
 
 /* Private functions prototypes ----------------------------------------------*/
+static void serial_port_de_idle(SerialPort *port);
 
 /* Private functions ---------------------------------------------------------*/
 
@@ -47,6 +48,25 @@ static uint8_t rts_status = UART_RTS_LOW;
 // UART Interface selector; RS-422 or RS-485 use only
 //static uint8_t uart_if_mode = UART_IF_RS422;
 // 외부 매개변수에 의존한다
+/*  The board's serial ports. Only the wiring is fixed here; serial_port_setup()
+    fills the resolved fields from the stored settings.
+    Channel numbering follows the DATA0_UART_* macros, not the RP2040 instance
+    numbers: DATA0 is the original data port, which is RP2040 uart1. */
+SerialPort g_serial_port[SERIAL_PORT_CNT] = {
+    [SEG_DATA0_CH] = {
+        .uart = uart1, .irq = UART1_IRQ, .channel = SEG_DATA0_CH,
+        .tx_pin = DATA0_UART_TX_PIN, .rx_pin = DATA0_UART_RX_PIN,
+        .cts_pin = DATA0_UART_CTS_PIN, .rts_pin = DATA0_UART_RTS_PIN,
+        .de_pin_board = DATA0_UART_RTS_PIN,
+    },
+    [SEG_DATA1_CH] = {
+        .uart = uart0, .irq = UART0_IRQ, .channel = SEG_DATA1_CH,
+        .tx_pin = RS485_UART_TX_PIN, .rx_pin = RS485_UART_RX_PIN,
+        .cts_pin = SERIAL_PIN_NONE, .rts_pin = SERIAL_PIN_NONE,
+        .de_pin_board = RS485_UART_DE_PIN,
+    },
+};
+
 extern xSemaphoreHandle seg_u2e_sem;
 extern xSemaphoreHandle segcp_uart_sem;
 
@@ -138,24 +158,41 @@ void uart_set_format_parity(uart_inst_t *uart, uint8_t data_bits, uint8_t stop_b
     }
 }
 
-/*  Bring `uart` up from that port's own settings block. The two ports differ
-    only in which block they read and which pins they own, so both go through
-    here instead of each caller repeating the sequence. */
-void uart_port_configuration(uart_inst_t *uart) {
+/*  Resolve the settings-driven fields, then bring the hardware up. This is the
+    one place that knows how a channel maps onto a settings block, so nothing
+    downstream has to ask which port it is holding. */
+void serial_port_init_all(void) {
+    for (uint8_t p = 0; p < SERIAL_PORT_CNT; p++) {
+        serial_port_setup(&g_serial_port[p]);
+    }
+}
+
+void serial_port_setup(SerialPort *port) {
     DevConfig *dev_config = get_DevConfig_pointer();
-    struct __serial_option *serial_option = (uart == uart0)
-                                            ? (struct __serial_option *) & (dev_config->serial_option_485)
-                                            : (struct __serial_option *) & (dev_config->serial_option);
-    uint8_t tx_pin = (uart == uart0) ? RS485_UART_TX_PIN : DATA0_UART_TX_PIN;
-    uint8_t rx_pin = (uart == uart0) ? RS485_UART_RX_PIN : DATA0_UART_RX_PIN;
-    /*  Which line driver this port runs. uart1 gets serial_intf_sel copied into
-        uart_interface by set_minimal_runtime_config(); uart0 has no such copy,
-        so read its extension field directly — otherwise bring-up and the TX
-        path (uart_de_mode_for) would disagree about the same port. */
-    uint8_t intf = (uart == uart0) ? uart_de_mode_for(uart)
-                                   : serial_option->uart_interface;
+    uart_inst_t *uart = port->uart;
+    uint8_t cfg_de, cfg_intf;
     uint8_t valid_arg = 0;
     uint8_t temp_data_bits, temp_stop_bits, temp_parity;
+
+    if (port->channel == SEG_DATA0_CH) {
+        port->opt = (struct __serial_option *) & (dev_config->serial_option);
+        cfg_de = dev_config->serial_de_pin;
+        cfg_intf = dev_config->serial_intf_sel;
+    } else {
+        port->opt = (struct __serial_option *) & (dev_config->serial_option_485);
+        cfg_de = dev_config->serial485_de_pin;
+        cfg_intf = dev_config->serial485_intf_sel;
+    }
+    struct __serial_option *serial_option = port->opt;
+
+    /*  0 means unset, and GPIO0 is a UART TX pin so it can never be DE. */
+    port->de_pin = (cfg_de != 0 && cfg_de <= 29) ? cfg_de : port->de_pin_board;
+    port->intf = (cfg_intf > UART_IF_RS485_REVERSE) ? UART_IF_RS232_TTL : cfg_intf;
+    port->protocol = (serial_option->protocol > sec_ups)
+                     ? protocol_none : serial_option->protocol;
+    uint8_t intf = port->intf;
+    uint8_t tx_pin = port->tx_pin;
+    uint8_t rx_pin = port->rx_pin;
 
     uart_deinit(uart);
 
@@ -166,17 +203,17 @@ void uart_port_configuration(uart_inst_t *uart) {
     // Set datasheet for more information on function select
     gpio_init(tx_pin);
     gpio_init(rx_pin);
-    /* CTS/RTS are wired on uart1 only; uart0 routes those GPIOs elsewhere. */
-    if (uart != uart0) {
-        gpio_init(DATA0_UART_CTS_PIN);
-        gpio_init(DATA0_UART_RTS_PIN);
+    /* Not every port has the handshake pair routed out. */
+    if (port->cts_pin != SERIAL_PIN_NONE) {
+        gpio_init(port->cts_pin);
+        gpio_init(port->rts_pin);
     }
 
     gpio_set_function(tx_pin, GPIO_FUNC_UART);
     gpio_set_function(rx_pin, GPIO_FUNC_UART);
-    if (uart != uart0) {
-        gpio_set_function(DATA0_UART_CTS_PIN, GPIO_FUNC_UART);
-        gpio_set_function(DATA0_UART_RTS_PIN, GPIO_FUNC_UART);
+    if (port->cts_pin != SERIAL_PIN_NONE) {
+        gpio_set_function(port->cts_pin, GPIO_FUNC_UART);
+        gpio_set_function(port->rts_pin, GPIO_FUNC_UART);
     }
     gpio_pull_up(rx_pin);
 
@@ -278,13 +315,14 @@ void uart_port_configuration(uart_inst_t *uart) {
             uart_if_mode = UART_IF_RS485;
         } else if (serial_option->flow_control == flow_reverserts) {
             uart_if_mode = UART_IF_RS485_REVERSE;
-        } else if (uart != uart0) {
+        } else if (port->channel == SEG_DATA0_CH) {
             uart_if_mode = get_uart_rs485_sel();
         } else {
-            /* uart0 has no interface strap pin; RS-485 is the board wiring. */
+            /* No interface strap pin on this port; RS-485 is the board wiring. */
             uart_if_mode = UART_IF_RS485;
         }
-        uart_rs485_rs422_init(uart_de_pin_for(uart), uart_if_mode);
+        port->intf = uart_if_mode;
+        serial_port_de_idle(port);
         serial_option->uart_interface = uart_if_mode;
     }
 #endif
@@ -299,7 +337,7 @@ void uart_port_configuration(uart_inst_t *uart) {
 }
 
 void DATA0_UART_Configuration(void) {
-    uart_port_configuration(UART_ID);
+    serial_port_setup(&g_serial_port[SEG_DATA0_CH]);
 }
 
 void DATA0_UART_Deinit(void) {
@@ -364,19 +402,17 @@ void check_uart_flow_control(uint8_t flow_ctrl) {
 }
 
 
-int32_t platform_uart_putc(uint16_t ch) {
-    struct __serial_option *serial_option = (struct __serial_option *) & (get_DevConfig_pointer()->serial_option);
-    uint8_t c[1];
+int32_t serial_port_putc(SerialPort *port, uint16_t ch) {
+    uint8_t mask = (port->opt->data_bits == word_len7) ? 0x7F : 0xFF;
 
-    if (serial_option->data_bits == word_len8) {
-        c[0] = ch & 0x00FF;
-    } else if (serial_option->data_bits == word_len7) {
-        c[0] = ch & 0x007F; // word_len7
-    }
     device_wdt_reset();
-    uart_putc(UART_ID, c[0]);
+    uart_putc_raw(port->uart, (char)(ch & mask));
 
     return RET_OK;
+}
+
+int32_t platform_uart_putc(uint16_t ch) {
+    return serial_port_putc(&g_serial_port[SEG_DATA0_CH], ch);
 }
 
 /*  Send `bytes` on `uart`, holding that port's DE line for the whole frame and
@@ -384,28 +420,22 @@ int32_t platform_uart_putc(uint16_t ch) {
 
     Raw output: uart_putc() would insert a CR ahead of any byte matching the
     port's line-feed setting, which corrupts binary protocols. */
-int32_t uart_puts_for(uart_inst_t *uart, const uint8_t *buf, uint16_t bytes) {
-    DevConfig *dev_config = get_DevConfig_pointer();
-    struct __serial_option *serial_option = (uart == uart0)
-                                            ? (struct __serial_option *) & (dev_config->serial_option_485)
-                                            : (struct __serial_option *) & (dev_config->serial_option);
-    uint8_t de_pin = uart_de_pin_for(uart);
-    uint8_t de_mode = uart_de_mode_for(uart);
-    uint8_t mask = (serial_option->data_bits == word_len7) ? 0x7F : 0xFF;
+int32_t serial_port_puts(SerialPort *port, const uint8_t *buf, uint16_t bytes) {
+    uint8_t mask = (port->opt->data_bits == word_len7) ? 0x7F : 0xFF;
     uint16_t i;
 
-    uart_rs485_enable(de_pin, de_mode);
+    serial_port_tx_enable(port);
     for (i = 0; i < bytes; i++) {
         device_wdt_reset();
-        uart_putc_raw(uart, (char)(buf[i] & mask));
+        uart_putc_raw(port->uart, (char)(buf[i] & mask));
     }
-    uart_rs485_disable(uart, de_pin, de_mode);
+    serial_port_tx_disable(port);
 
     return bytes;
 }
 
 int32_t platform_uart_puts(uint8_t* buf, uint16_t bytes) {
-    return uart_puts_for(UART_ID, buf, bytes);
+    return serial_port_puts(&g_serial_port[SEG_DATA0_CH], buf, bytes);
 }
 
 #ifdef __USE_UART_485_422__
@@ -417,60 +447,33 @@ uint8_t get_uart_rs485_sel(void) {
     return UART_IF_RS485;
 }
 
-uint8_t uart_de_pin_for(uart_inst_t *uart) {
-    DevConfig *cfg = get_DevConfig_pointer();
-    uint8_t p = (uart == uart0) ? cfg->serial485_de_pin : cfg->serial_de_pin;
-    if (p != 0 && p <= 29) {
-        return p;
-    }
-    return (uart == uart0) ? RS485_UART_DE_PIN : DATA0_UART_RTS_PIN;
-}
-
-int uart_channel_for(uart_inst_t *uart) {
-    return (uart == uart0) ? SEG_DATA1_CH : SEG_DATA0_CH;
-}
-
-uint8_t uart_protocol_for(uart_inst_t *uart) {
-    DevConfig *cfg = get_DevConfig_pointer();
-    uint8_t protocol = (uart == uart0) ? cfg->serial_option_485.protocol
-                                       : cfg->serial_option.protocol;
-    return (protocol > sec_ups) ? protocol_none : protocol;
-}
-
-uint8_t uart_de_mode_for(uart_inst_t *uart) {
-    DevConfig *cfg = get_DevConfig_pointer();
-    uint8_t uart_if_mode = (uart == uart0) ? cfg->serial485_intf_sel : cfg->serial_intf_sel;
-    return (uart_if_mode > UART_IF_RS485_REVERSE) ? UART_IF_RS232_TTL : uart_if_mode;
-}
-
-void uart_rs485_rs422_init(uint8_t de_pin, uint8_t uart_if_mode) {
-    GPIO_Configuration(de_pin, GPIO_OUT, IO_NOPULL); // DE pin: GPIO / Output
-    if (uart_if_mode == UART_IF_RS485) {
-        GPIO_Output_Reset(de_pin);    // DE pin init, Set the signal low
+/*  Put the DE line in its receive state. Called from setup once the interface
+    is known; the idle level is inverted in the reverse variant. */
+static void serial_port_de_idle(SerialPort *port) {
+    GPIO_Configuration(port->de_pin, GPIO_OUT, IO_NOPULL);
+    if (port->intf == UART_IF_RS485) {
+        GPIO_Output_Reset(port->de_pin);
     } else {
-        GPIO_Output_Set(de_pin);    // DE pin init, Set the signal low
+        GPIO_Output_Set(port->de_pin);
     }
 }
 
-void uart_rs485_enable(uint8_t de_pin, uint8_t uart_if_mode) {
-    if (uart_if_mode == UART_IF_RS485) {
-        GPIO_Output_Set(de_pin);
-    } else if (uart_if_mode == UART_IF_RS485_REVERSE) {
-        GPIO_Output_Reset(de_pin);
+void serial_port_tx_enable(SerialPort *port) {
+    if (port->intf == UART_IF_RS485) {
+        GPIO_Output_Set(port->de_pin);
+    } else if (port->intf == UART_IF_RS485_REVERSE) {
+        GPIO_Output_Reset(port->de_pin);
     }    //UART_IF_RS422: None
 }
 
+void serial_port_tx_disable(SerialPort *port) {
+    if (port->intf == UART_IF_RS485) {
+        uart_tx_wait_blocking(port->uart);
+        GPIO_Output_Reset(port->de_pin);
 
-void uart_rs485_disable(uart_inst_t *uart, uint8_t de_pin, uint8_t uart_if_mode) {
-    if (uart_if_mode == UART_IF_RS485) {
-        uart_tx_wait_blocking(uart);
-        // DE pin -> Low;
-        GPIO_Output_Reset(de_pin);
-
-    } else if (uart_if_mode == UART_IF_RS485_REVERSE) {
-        uart_tx_wait_blocking(uart);
-        // DE pin -> High
-        GPIO_Output_Set(de_pin);
+    } else if (port->intf == UART_IF_RS485_REVERSE) {
+        uart_tx_wait_blocking(port->uart);
+        GPIO_Output_Set(port->de_pin);
     }
     //UART_IF_RS422: None
 }
