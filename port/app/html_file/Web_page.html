@@ -529,7 +529,7 @@ th {
                         <th>Mode</th>
                         <td>
                             <select id="serial_mode" class="ip-input">
-                                <option value="0">Free</option><option value="1">Modbus RTU</option><option value="2">Modbus ASCII</option><option value="3">SEC UPS</option><option value="4">Custom</option>
+                                <!-- /api/config 의 protocols 로 채워짐 -->
                             </select>
                         </td>
                     </tr>
@@ -599,7 +599,7 @@ th {
                         <th>Mode</th>
                         <td>
                             <select id="serial485_mode" class="ip-input">
-                                <option value="0">Free</option><option value="1">Modbus RTU</option><option value="2">Modbus ASCII</option><option value="3">SEC UPS</option><option value="4">Custom</option>
+                                <!-- /api/config 의 protocols 로 채워짐 -->
                             </select>
                         </td>
                     </tr>
@@ -792,12 +792,28 @@ var CFG_IPS=['allowed_ip0','allowed_ip1','allowed_ip2','allowed_ip3',
              'web_ip0','web_ip1'];
 var CFG_SERIAL=['serial_intf','serial_de','serial_baud','serial_data','serial_parity','serial_flow','serial_mode',
                 'serial485_intf','serial485_de','serial485_baud','serial485_data','serial485_parity','serial485_flow','serial485_mode'];
+/*  Mode 드롭다운은 펌웨어가 준 목록으로 만든다.
+    프로토콜을 추가할 때 이 페이지는 고칠 필요가 없다. */
+function fillModes(list){
+    if(!list || !list.length) return;
+    var ids=['serial_mode','serial485_mode'];
+    for(var k=0;k<ids.length;k++){
+        var sel=document.getElementById(ids[k]);
+        if(!sel || sel.options.length) continue;
+        for(var i=0;i<list.length;i++){
+            var o=document.createElement('option');
+            o.value=list[i].id; o.textContent=list[i].name;
+            sel.appendChild(o);
+        }
+    }
+}
 function loadConfig(){
     fetch('/api/config').then(function(r){
         if(authRedirect(r)) return null;
         return r.json();
     }).then(function(d){
         if(!d) return;
+        fillModes(d.protocols);
         document.getElementById('net_mac').textContent=d.mac||'-';
         document.getElementById('net_dhcp').value=d.dhcp;
         document.getElementById('net_ip').value=d.ip;

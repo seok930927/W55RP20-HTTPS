@@ -792,286 +792,31 @@ if ((port->channel == SEG_DATA0_CH) && (opmode == DEVICE_AT_MODE)) {
 
 ### 체크리스트
 
-| # | 파일 | 할 일 |
-|---|---|---|
-| 1 | [ConfigData.h](port/app/configuration/inc/ConfigData.h) | `reserved_ext[]` **바로 앞**에 필드 추가. 위치는 항상 끝(reserved 직전) |
-| 2 | [ConfigData.h:217](port/app/configuration/inc/ConfigData.h#L217) | `DEVCONFIG_RESERVED_EXT_SIZE` 를 추가 바이트만큼 감소 |
-| 3 | [ConfigData.h:210-216](port/app/configuration/inc/ConfigData.h#L210-L216) | 위 계산식 주석에 뺄셈 항 추가 (다음 사람을 위해) |
-| 4 | [ConfigData.c: `set_DevConfig_ext_to_factory_value()`](port/app/configuration/src/ConfigData.c#L220) | 팩토리 기본값 대입 |
-| 5 | (필요시) [ConfigData.h:208](port/app/configuration/inc/ConfigData.h#L208) | **0 이 기존 동작과 다르면** `DEVCONFIG_EXT_VERSION` 을 +1 하고 `ext_version history` 주석에 한 줄 추가 → 기존 장비의 EXT 가 팩토리 값으로 재초기화된다 |
-| 6 | 웹에 노출한다면 | [4.2](#42-웹-설정-항목-추가) 로 진행 |
-
-### 검증
-
-```bash
-# 반드시 1596 이 나와야 한다 (필드 추가 전후 동일)
-```
-```c
-/* ConfigData.h 맨 아래에 임시로 넣고 빌드해보면 즉시 잡힌다 */
-_Static_assert(sizeof(DevConfig) == 1596, "DevConfig layout changed!");
-```
-
-| ☐ | 항목 |
-|---|---|
-| ☐ | `sizeof(DevConfig)` 가 1596 그대로인가 |
-| ☐ | `reserved_ext` 크기를 정확히 줄였는가 |
-| ☐ | 새 필드가 `reserved_ext` **앞**에 있는가 (뒤에 두면 기존 장비에서 0 이 아닌 쓰레기를 읽는다) |
-| ☐ | 값 0 이 기존 동작인가? 아니면 `ext_version` 을 올렸는가 |
-| ☐ | LEGACY 구역은 **손대지 않았는가** (설정툴/부트로더가 오프셋에 의존) |
-
-### 실제 사례 — `serial_de_pin` 추가 (현재 워킹트리)
-
-```diff
--#define DEVCONFIG_RESERVED_EXT_SIZE    52
-+#define DEVCONFIG_RESERVED_EXT_SIZE    51
-
-     uint8_t  serial485_de_pin;
-+    /*  uart1 RS-485 DE / nRE GPIO number. Same 0-means-unset rule as above;
-+        0 => board default DATA0_UART_RTS_PIN. */
-+    uint8_t  serial_de_pin;
-```
-```diff
-     dev_config.serial485_de_pin = RS485_UART_DE_PIN;
-+    dev_config.serial_de_pin = DATA0_UART_RTS_PIN;
-```
-`ext_version` 을 안 올린 이유: **0 이면 보드 기본값**이라 기존 장비 동작이 그대로다.
-
----
-
-## 4.2 웹 설정 항목 추가
-
-웹 설정 하나를 추가하려면 **4곳**을 손봐야 한다. 하나라도 빠지면 조용히 실패한다.
-
-```
- ① HTML 입력 필드     ──► ② Web_page.h 재생성
-                             │
- ③ GET JSON 직렬화 ◄─────────┴────────► ④ POST 파싱 + 검증
-   (https_send_config_json)             (https_handle_config_post)
-```
-
-### 체크리스트
-
-| # | 파일 | 할 일 |
-|---|---|---|
-| 1 | [Web_page.html](port/app/html_file/Web_page.html) | `<input id="…">` 또는 `<select id="…">` 추가. **id 가 JSON 키가 된다** |
-| 2 | [Web_page.html:786-787](port/app/html_file/Web_page.html#L786-L787) | 시리얼 항목이면 `CFG_SERIAL[]` 배열에, IP 항목이면 `CFG_IPS[]` 에 id 추가 → load/save 가 자동 처리 |
-| 3 | (그 외 항목) | `loadConfig()`(:788) 와 `saveConfig()`(:827) 에 개별 라인 추가 |
-| 4 | **재생성** | `py -3 tools/html_to_c_header.py` (프로젝트 루트에서) |
-| 5 | [httpHandler.c: `https_send_config_json`:398](port/app/platform_handler/src/httpHandler.c#L398) | `snprintf` 체인에 키 추가 |
-| 6 | [httpHandler.c: `https_handle_config_post`:514](port/app/platform_handler/src/httpHandler.c#L514) | 파싱 + 검증 추가. 성공 시 `changed = 1` |
-| 7 | [4.1](#41-devconfig-ext-에-설정-필드-추가) | 저장되는 값이면 DevConfig 필드부터 |
-
-### ①,② HTML → Web_page.h
-
-`Web_page.html` 을 고치면 **반드시** 헤더를 재생성해야 한다.
-
-```bash
-py -3 tools/html_to_c_header.py
-```
-
-| 사실 | 내용 |
-|---|---|
-| 출력 | `port/app/html_file/Web_page.h` — `static const unsigned char _acWeb_page[…]` |
-| CMake 자동화 | [CMakeLists.txt:150-159](CMakeLists.txt#L150-L159) 의 `html_to_c_header` 타겟이 `Boot`, `App_linker` 빌드 전에 자동 실행 |
-| ⚠ 함정 | 의존성이 걸린 건 `App_linker` 이고 **`App` 타겟에는 안 걸려 있다.** `App` 만 빌드하면 재생성이 안 된다 |
-| 커밋 | `Web_page.h` 는 **git 에 추적되는 생성물**이다. HTML 과 같이 커밋해야 한다 |
-
-### ③ GET 직렬화 — 예시
-
-```c
-/* https_send_config_json() 안, 닫는 '}' 앞에 */
-n += snprintf(body + n, sizeof(body) - n, "\"my_field\":%u,", conf->my_field);
-```
-
-> ⚠ **`body[1024]` 는 `n` 이 버퍼를 넘는지 검사하지 않는다** ([httpHandler.c:400-403](port/app/platform_handler/src/httpHandler.c#L400-L403) 주석 참조).
-> 필드를 추가할 때마다 크기를 확인하고, 빡빡하면 배열을 키워라.
-
-### ④ POST 파싱 — 세 가지 패턴
-
-**패턴 A — 작은 정수 (가장 흔함).** `sfields[]` 테이블에 한 줄만 추가하면 끝난다.
-
-```c
-/* httpHandler.c:683 sfields[] */
-{ "\"my_field\":", &conf->my_field, 7 },   /* 마지막 숫자 = 허용 최댓값 */
-```
-
-**패턴 B — 문자열.** `parse_json_str()` 사용.
-
-```c
-if (parse_json_str(actual_body, "\"my_str\":", conf->my_str, sizeof(conf->my_str))) {
-    changed = 1;
-}
-```
-
-**패턴 C — IPv4.** `netf[]`(:547) 또는 `web_ip%d` 루프(:579) 패턴을 복사.
-
-**패턴 D — 16비트 이상 정수.**
-
-> ⚠ **`&conf->필드` 로 포인터를 만들어 쓰지 마라.** DevConfig 는 `packed` 라서
-> 포인터를 거치는 순간 정렬 정보가 사라지고, Cortex-M0+ 에서 비정렬 `STRH` 가 나와 **HardFault** 한다.
-> `conf->필드 = 값;` 처럼 **멤버에 직접 대입**해야 컴파일러가 바이트 단위로 쪼개준다.
-> ([httpHandler.c:653-657](port/app/platform_handler/src/httpHandler.c#L653-L657) 주석)
-
-```c
-const char *pp = strstr(actual_body, "\"my_port\":");
-if (pp) {
-    unsigned int v = 0;
-    if (sscanf(pp + strlen("\"my_port\":"), "%u", &v) == 1 && v >= 1 && v <= 65535) {
-        conf->my_port = (uint16_t)v;   /* ← 직접 대입 */
-        changed = 1;
-    }
-}
-```
-
-### 버퍼 크기 표 (넘치면 조용히 잘린다)
-
-| 버퍼 | 크기 | 위치 | 넘치면 |
-|---|---|---|---|
-| `https_rx_buf[]` | 2048 | [httpHandler.c:24](port/app/platform_handler/src/httpHandler.c#L24) | 요청 헤더+본문 잘림 |
-| `post_extra_buf[]` | 1536 | [httpHandler.c:518](port/app/platform_handler/src/httpHandler.c#L518) | **뒤쪽 필드가 조용히 누락, UI 는 "저장 완료"** ([5.3](#53-post-본문이-버퍼보다-길면-뒤쪽-필드가-조용히-사라진다)) |
-| `body[]` (config GET) | 1024 | [httpHandler.c:403](port/app/platform_handler/src/httpHandler.c#L403) | 버퍼 오버런 위험 (검사 없음) |
-| `chunk[]` (sensor GET) | 512 | [httpHandler.c:318](port/app/platform_handler/src/httpHandler.c#L318) | 해당 device 항목만 건너뜀 |
-
-### 최종 확인
-
-| ☐ | 항목 |
-|---|---|
-| ☐ | `py -3 tools/html_to_c_header.py` 실행했는가 |
-| ☐ | `Web_page.h` 를 커밋에 포함했는가 |
-| ☐ | GET 과 POST 의 **JSON 키 이름이 같은가** (`loadConfig()` 가 GET 응답으로 폼을 채운다) |
-| ☐ | POST 검증 상한이 enum 최댓값과 맞는가 |
-| ☐ | `post_extra_buf` 여유가 있는가 |
-| ☐ | 재부팅이 필요한 항목이면 HTML 섹션 제목에 "(재부팅 후 적용)" 을 넣었는가 |
-
----
-
-## 4.3 SNMP OID 추가 / 트랩 추가
-
-> ⚠ SNMP 코드는 **서브모듈(`libraries/ioLibrary_Driver`) 안**에 있다.
-> 고치면 반드시 `ioLibrary_snmp_patch.patch` 를 재생성해야 한다 ([6.2](#62-서브모듈-패치-워크플로)).
-
-### 4.3.1 먼저 확인 — 값 컬럼만 늘리면 되는 경우가 대부분이다
-
-장치마다 노출하는 값(온도/습도/알람)을 **하나 더 늘리는 것**이라면 SNMP 코드를 건드릴 필요가 없다.
-테이블은 `DEVICE_VALUE_COLS` 에서 자동 생성된다.
-
-| # | 파일 | 할 일 |
-|---|---|---|
-| 1 | [sensor.h:32](port/app/platform_handler/inc/sensor.h#L32) | `DEVICE_VALUE_COLS` 를 3 → 4 |
-| 2 | [sensor.c:11-15](port/app/platform_handler/src/sensor.c#L11-L15) | `g_value_columns[]` 에 `{ "Pressure", "hPa", -1 }` 추가 (배열 길이 = `DEVICE_VALUE_COLS`) |
-| 3 | — | SNMP 테이블·웹 JSON·UART S/T/R 컬럼 수가 **자동으로** 따라온다 |
-
-제약:
-
-| 제약 | 값 | 이유 |
-|---|---|---|
-| `DEVICE_COUNT` ≤ 127 | 현재 64 | 셀 OID 서브식별자가 1바이트를 유지해야 함 |
-| `2 + DEVICE_VALUE_COLS` ≤ 127 | 현재 5 | 〃 |
-| `snmpData[]` 크기 | `7 + (2+COLS)×ROWS` | 컬럼 하나 늘 때마다 64 엔트리 증가 = **RAM 약 +5.6 KB** |
-
-> RAM 여유를 확인하라. 힙은 96 KB 이고 `snmpData[]` 는 정적(.bss) 이다.
-
-### 4.3.2 새 OID 서브트리를 추가하는 경우
-
-| # | 파일 | 할 일 |
-|---|---|---|
-| 1 | [snmp_custom.c: `initTable()`:92](libraries/ioLibrary_Driver/Internet/SNMP/snmp_custom.c#L92) | 엔트리 채우기 (`oidlen`, `oid[]`, `dataType`, `dataLen`, `u.*`) |
-| 2 | [snmp_custom.c:47-48](libraries/ioLibrary_Driver/Internet/SNMP/snmp_custom.c#L47-L48) | `snmpData[]` 배열 크기와 `maxData` 를 함께 늘림 |
-| 3 | **OID 순서** | 새 엔트리가 **오름차순 위치**에 들어가야 한다 ([5.6](#56-snmpdata-는-oid-오름차순이어야-한다)) |
-| 4 | `oidlen` | **`MAX_OID = 12` 를 넘으면 안 된다** ([snmp.h:17](libraries/ioLibrary_Driver/Internet/SNMP/snmp.h#L17)). 여유 없음 |
-| 5 | 값 동기화 | 동적 값이면 `snmp_custom_refresh()`(:131) 에 갱신 코드 추가, 또는 `getfunction` 콜백 등록 |
-| 6 | 패치 재생성 | [6.2](#62-서브모듈-패치-워크플로) |
-
-`dataEntryType` 필드 ([snmp.h:99-110](libraries/ioLibrary_Driver/Internet/SNMP/snmp.h#L99-L110)):
-
-| 필드 | 의미 |
-|---|---|
-| `oidlen` / `oid[12]` | BER 인코딩된 OID (첫 바이트 `0x2b` = `1.3`) |
-| `dataType` | `SNMPDTYPE_INTEGER`(0x02), `_OCTET_STRING`(0x04), `_OBJ_ID`(0x06), `_TIME_TICKS`(0x43) … |
-| `dataLen` | INTEGER 는 4, OCTET STRING 은 실제 길이 (최대 `MAX_STRING`=64) |
-| `u.intval` / `u.octetstring[64]` | 값 |
-| `getfunction(void*, uint8_t*)` | 읽을 때 호출 (예: `currentUptime`) |
-| `setfunction(int32_t)` | SET 요청 처리. **NULL 이면 읽기 전용** |
-
-Enterprise 번호(22210)가 박혀 있는 곳 — 바꾸려면 **전부** 고쳐야 한다:
-
-| 위치 | 내용 |
-|---|---|
-| [snmp_custom.c:59-60](libraries/ioLibrary_Driver/Internet/SNMP/snmp_custom.c#L59-L60) | `ENTRY_OID_PREFIX[10]` — deviceEntry |
-| [snmp_custom.c:63-64](libraries/ioLibrary_Driver/Internet/SNMP/snmp_custom.c#L63-L64) | `NOTIFY_OID[10]` — 트랩 |
-| [snmp_custom.c:97-98](libraries/ioLibrary_Driver/Internet/SNMP/snmp_custom.c#L97-L98) | `sysObjectID` — **이스케이프 문자열** `"\x2b…\x81\xad\x42\x01\x00"` |
-| [snmp_custom.c:198-199](libraries/ioLibrary_Driver/Internet/SNMP/snmp_custom.c#L198-L199) | `initial_Trap()` 의 두 OID |
-
-> 22210 은 BER 3바이트(`81 AD 42`)로 인코딩된다. **다른 번호로 바꾸면 인코딩 길이가 달라져 `oidlen` 이 전부 틀어질 수 있다.**
-
-### 4.3.3 트랩 추가
-
-기존 경로:
-
-```
-  누군가 ──► snmp_notify_device(dev)      [어느 태스크에서든 안전, 큐에 넣기만]
-                    │  ring queue 32칸
-  snmp_agent_task ──► snmp_flush_traps()  ──► 컬럼마다 snmp_custom_sendValueTrap()
-```
-
-| # | 할 일 | 위치 |
-|---|---|---|
-| 1 | 트랩을 쏘고 싶은 지점에서 `snmp_notify_device(dev)` 호출 | 예: [sensorUart.c:214](port/app/platform_handler/src/sensorUart.c#L214) (T 명령) |
-| 2 | 새로운 종류의 트랩이면 `snmp_custom_sendValueTrap()` 을 본떠 함수 추가 | [snmp_custom.c:159](libraries/ioLibrary_Driver/Internet/SNMP/snmp_custom.c#L159) |
-| 3 | 트랩 목적지는 `snmp_option.trap_ip[4]`, 0.0.0.0 슬롯은 건너뜀 | [snmpHandler.c:107-111](port/app/platform_handler/src/snmpHandler.c#L107-L111) |
-
-주의:
-
-| ☐ | 항목 |
-|---|---|
-| ☐ | 트랩 송신은 **`snmp_agent_task` 안에서만** — 트랩 소켓(소켓 0)을 공유하므로 |
-| ☐ | 큐가 꽉 차면 조용히 버린다 (32칸) |
-| ☐ | `trap_disable` 이 1 이면 큐만 비우고 안 보낸다 |
-| ☐ | 트랩 community 는 `snmp_get_trap_community()` 로 얻는다 (에이전트 community 와 별개) |
-
-### 4.3.4 런타임 SNMP 설정 API
-
-앱 → SNMP 코어로 값을 주입하는 함수들. 전부 `snmpd_run()` 전에 호출해야 한다.
-호출처: [`snmp_agent_init()` snmpHandler.c:43](port/app/platform_handler/src/snmpHandler.c#L43)
-
-| 함수 | 인자 | 기본 동작 |
-|---|---|---|
-| `snmp_set_agent_port(uint16_t)` | 0 이면 무시 | 161 |
-| `snmp_set_allowed_ips(const uint8_t[4][4])` | 전부 0 → 모두 허용 | 모두 허용 |
-| `snmp_set_community(const char*)` | `""`/NULL → `"public"` | `"public"` |
-| `snmp_set_permission(uint8_t)` | 0=R/W, 1=R/O, 2=차단 | R/W |
-| `snmp_set_trap_community(const char*)` | 〃 | `"public"` |
-| `snmp_get_trap_community(void)` | — | — |
-
-설정 변경 후 **재적용**: 웹 POST 가 `snmp_request_reinit()` 을 부르면 소켓이 닫히고 다음 사이클에 `snmp_agent_init()` 이 다시 돈다 ([httpHandler.c:712](port/app/platform_handler/src/httpHandler.c#L712)).
-
----
-
-## 4.4 새 시리얼 프로토콜 추가
-
-**[protoTemplate.c](port/app/platform_handler/src/protoTemplate.c) 를 복사해서 시작하라.** 빌드되는 상태로 들어 있고, 포트 세팅·DE 제어·AT 모드 양보·뱅크 등록이 이미 되어 있다. 채울 곳은 `protoTemplate_poll()` 안의 TODO 두 개뿐이다. 웹 Mode 드롭다운의 **Custom**(값 4)이 이 파일에 묶여 있다.
-
-### 두 가지 구현 스타일
-
-| 스타일 | 언제 | 예시 | 특징 |
-|---|---|---|---|
-| **동기 폴러** | 마스터로서 우리가 먼저 묻는다 | `modbusMaster.c` | RX ISR 없음. 태스크가 직접 FIFO 를 훑음. 단순함 |
-| **ISR + 파서 태스크** | 상대가 언제든 보낸다 | `sensorUart.c` | RX ISR → 링버퍼 → 세마포어 → 태스크 |
-
-새 프로토콜은 대개 **동기 폴러**가 맞다.
-
-### 체크리스트
+프로토콜이 존재한다는 사실은 **[serialProtocol.c](port/app/platform_handler/src/serialProtocol.c) 의 `g_serial_protocol[]` 한 곳**에만 적는다.
+태스크 생성·소유권 판정·웹 검증 상한·Mode 드롭다운이 전부 이 표에서 나온다.
 
 | # | 파일 | 할 일 |
 |---|---|---|
 | 1 | [uartHandler.h](port/app/platform_handler/inc/uartHandler.h) `enum protocol` | 값 추가. `sec_ups`(3) 와 `protocol_custom`(4) 는 이미 있다 |
-| 2 | `platform_handler/inc/myproto.h`<br>`platform_handler/src/myproto.c` | `xxx_init(uart_inst_t*)`, `xxx_poll(...)`, `xxx_task(void*)` 3종 |
-| 3 | [port/app/CMakeLists.txt:190-209](port/app/CMakeLists.txt#L190-L209) | `APP_PLATFORM_FILES` 의 `target_sources` 에 `.c` 추가 ([4.6](#46-소스-파일-추가-cmake-등록)) |
-| 4 | [App.c](main/App/App.c) 의 포트 루프 | `g_serial_port[p].protocol` 분기에 새 값 추가 + `xTaskCreate(..., &g_serial_port[p], ...)` |
-| 5 | [sensorUart.c](port/app/platform_handler/src/sensorUart.c) `sensorUart_claim()` | 그 포트를 새 프로토콜이 가져간다면 S/T/R 이 비키도록 조건 추가 |
-| 6 | [Web_page.html:524](port/app/html_file/Web_page.html#L524) / `:594` | Mode `<select>` 에 `<option value="3">…</option>` 추가 → **`Web_page.h` 재생성** |
-| 7 | [httpHandler.c:689](port/app/platform_handler/src/httpHandler.c#L689) / `:697` | `sfields[]` 의 `serial_mode` / `serial485_mode` 상한. 현재 4까지 열려 있다 |
-| 8 | — | 값을 `device_setValue()` 로 device bank 에 쓴다 → SNMP/웹은 그대로 동작 |
+| 2 | `platform_handler/{inc,src}/myproto.[ch]` | `protoTemplate.[ch]` 를 복사해서 이름만 바꾼다 |
+| 3 | [port/app/CMakeLists.txt](port/app/CMakeLists.txt) | `APP_PLATFORM_FILES` 의 `target_sources` 에 `.c` 추가 ([4.6](#46-소스-파일-추가-cmake-등록)) |
+| 4 | [serialProtocol.c](port/app/platform_handler/src/serialProtocol.c) `g_serial_protocol[]` | **한 줄 추가** — id, 표시 이름, 태스크, 스택, 우선순위 |
+| 5 | — | 값을 `device_setValue()` 로 device bank 에 쓴다 → SNMP·웹은 그대로 동작 |
+
+```c
+/* 4번은 이 한 줄이 전부다 */
+{ my_protocol, "My Protocol", myproto_task, 1024, 9 },
+```
+
+**손대지 않는 것**: `App.c`, `sensorUart.c`, `httpHandler.c`, `Web_page.html`, `Web_page.h`.
+태스크 이름은 `"<이름>_ch<채널>"` 로 자동 생성되고, Mode 드롭다운은 `/api/config` 가 내려주는
+`protocols` 배열로 페이지가 직접 만든다.
+
+| 표의 항목 | 뜻 |
+|---|---|
+| `task` 가 `NULL` | 전용 핸들러 없음 → sensorUart 가 그 포트를 잡고 S/T/R 을 돌린다 |
+| `stack` | 워드 단위 (`xTaskCreate` 와 같은 단위) |
+| `priority` | **31 이하** ([5.9](#59-configassert-는-릴리스에서-무효다)) |
 
 ### 골격 코드
 

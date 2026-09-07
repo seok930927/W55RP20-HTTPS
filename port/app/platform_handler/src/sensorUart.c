@@ -14,6 +14,7 @@
 
 #include "sensorUart.h"
 #include "seg.h"           /* SEG_DATA0_CH / SEG_DATA1_CH */
+#include "serialProtocol.h"   /* serial_protocol_has_handler */
 #include "sensor.h"
 #include "snmpHandler.h"      /* snmp_notify_device */
 #include "ConfigData.h"       /* get_DevConfig_pointer, struct __serial_option */
@@ -117,7 +118,7 @@ static void sensorUart_rs485_rx_isr(void) {
 static void sensorUart_claim(SerialPort *port) {
     serial_port_setup(port);
 
-    if ((port->protocol == modbus_rtu) || (port->protocol == protocol_custom)) {
+    if (serial_protocol_has_handler(port->protocol)) {
         PRT_INFO("sensorUart: ch%d protocol=%u -> handed to its own handler\r\n",
                  port->channel, port->protocol);
         return;

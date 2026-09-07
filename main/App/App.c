@@ -28,8 +28,7 @@
 #include "segcp.h"
 #include "sensor.h"
 #include "sensorUart.h"
-#include "modbusMaster.h"
-#include "protoTemplate.h"
+#include "serialProtocol.h"   /* protocol registry: task table */
 
 #include "w5x00_spi.h"
 
@@ -61,11 +60,7 @@
 #define SENSOR_UART_TASK_STACK_SIZE 1024
 #define SENSOR_UART_TASK_PRIORITY 9
 
-#define MODBUS_MASTER_TASK_STACK_SIZE 1024
-#define MODBUS_MASTER_TASK_PRIORITY 9
 
-#define PROTO_TEMPLATE_TASK_STACK_SIZE 1024
-#define PROTO_TEMPLATE_TASK_PRIORITY 9
 
 #define HEAP_MONITOR_TASK_STACK_SIZE 1024
 #define HEAP_MONITOR_TASK_PRIORITY 6
@@ -298,25 +293,10 @@ void start_task(void *argument) {
     xTaskCreate(segcp_tcp_task, "SEGCP_tcp_Task", SEGCP_TCP_TASK_STACK_SIZE, NULL, SEGCP_TCP_TASK_PRIORITY, NULL);
     xTaskCreate(segcp_serial_task, "SEGCP_serial_Task", SEGCP_SERIAL_TASK_STACK_SIZE, NULL, SEGCP_SERIAL_TASK_PRIORITY, NULL);
     xTaskCreate(sensorUart_task, "Sensor_UART_Task", SENSOR_UART_TASK_STACK_SIZE, NULL, SENSOR_UART_TASK_PRIORITY, NULL);
+    /*  Whatever each port is set to, started from the one table that knows
+        about it. Ports with no handler of their own stay with sensorUart. */
     for (uint8_t p = 0; p < SERIAL_PORT_CNT; p++) {
-        char task_name[configMAX_TASK_NAME_LEN];
-
-        switch (g_serial_port[p].protocol) {
-        case modbus_rtu:
-            snprintf(task_name, sizeof(task_name), "Modbus_ch%u", p);
-            xTaskCreate(modbusMaster_task, task_name, MODBUS_MASTER_TASK_STACK_SIZE,
-                        &g_serial_port[p], MODBUS_MASTER_TASK_PRIORITY, NULL);
-            break;
-
-        case protocol_custom:
-            snprintf(task_name, sizeof(task_name), "Custom_ch%u", p);
-            xTaskCreate(protoTemplate_task, task_name, PROTO_TEMPLATE_TASK_STACK_SIZE,
-                        &g_serial_port[p], PROTO_TEMPLATE_TASK_PRIORITY, NULL);
-            break;
-
-        default:
-            break;      /* sensorUart keeps the port */
-        }
+        serial_protocol_start(&g_serial_port[p]);
     }
     // xTaskCreate(heap_monitor_task, "Heap_Monitor_Task", HEAP_MONITOR_TASK_STACK_SIZE, NULL, HEAP_MONITOR_TASK_PRIORITY, NULL);
 #ifdef __USE_WATCHDOG__

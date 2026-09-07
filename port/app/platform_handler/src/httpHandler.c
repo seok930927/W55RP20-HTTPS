@@ -15,6 +15,7 @@
 #include "sensor.h"
 #include "ConfigData.h"
 #include "snmpHandler.h"
+#include "serialProtocol.h"   /* protocol registry */
 
 #define HTTPS_SERVER_PORT   443
 /*  RX buffer must hold a full request line + headers + body in one mbedtls_ssl_read.
@@ -397,10 +398,11 @@ static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
 
 static int https_send_config_json(wiz_tls_context *tls_ctx) {
     DevConfig *conf = get_DevConfig_pointer();
-    /*  The snprintf chain below never checks `n` against the buffer, so this must
-        stay comfortably above the worst-case body (~675 B measured).
-        Grow it whenever a field is appended. */
-    char body[1024];
+    /*  Worst case is ~825 B: the settings, plus the protocol list, which grows
+        with every row added to g_serial_protocol[]. The chain below cannot
+        overrun -- each snprintf is bounded -- but it can truncate, which the
+        check after it catches rather than serving half a JSON object. */
+    char body[1536];
     char header[128];
     uint16_t sess_min = conf->https_session_timeout_min;
     if (sess_min < HTTPS_SESSION_TIMEOUT_MIN_MIN || sess_min > HTTPS_SESSION_TIMEOUT_MIN_MAX) {
@@ -471,13 +473,24 @@ static int https_send_config_json(wiz_tls_context *tls_ctx) {
     n += snprintf(body + n, sizeof(body) - n,
                   "\"serial485_intf\":%u,\"serial485_de\":%u,"
                   "\"serial485_baud\":%u,\"serial485_data\":%u,\"serial485_parity\":%u,"
-                  "\"serial485_flow\":%u,\"serial485_mode\":%u}",
+                  "\"serial485_flow\":%u,\"serial485_mode\":%u",
                   conf->serial485_intf_sel,
                   (conf->serial485_de_pin != 0 && conf->serial485_de_pin <= 29)
                   ? conf->serial485_de_pin : RS485_UART_DE_PIN,
                   conf->serial_option_485.baud_rate, conf->serial_option_485.data_bits,
                   conf->serial_option_485.parity, conf->serial_option_485.flow_control,
                   conf->serial_option_485.protocol);
+    /*  The Mode dropdown is built from this, so the page never carries its own
+        copy of the protocol list. */
+    n += snprintf(body + n, sizeof(body) - n, ",\"protocols\":");
+    n += serial_protocol_to_json(body + n, (int)(sizeof(body) - n));
+    n += snprintf(body + n, sizeof(body) - n, "}");
+
+    if (n < 0 || n >= (int)sizeof(body)) {
+        PRT_SSL("config json truncated at %d bytes -- grow body[]\r\n", n);
+        return -1;
+    }
+
     int hlen = snprintf(header, sizeof(header),
                         "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                         "Content-Length: %d\r\nConnection: close\r\n\r\n", n);
@@ -688,7 +701,7 @@ static int https_handle_config_post(wiz_tls_context *tls_ctx, const char *body) 
             { "\"serial_data\":",   &conf->serial_option.data_bits,    2  },
             { "\"serial_parity\":", &conf->serial_option.parity,       4  },
             { "\"serial_flow\":",   &conf->serial_option.flow_control, 4  },
-            { "\"serial_mode\":",   &conf->serial_option.protocol,     4  },
+            { "\"serial_mode\":",   &conf->serial_option.protocol,     serial_protocol_max_id() },
             { "\"serial_de\":",     &conf->serial_de_pin,              29 },
             { "\"serial485_intf\":",   &conf->serial485_intf_sel,             3  },
             { "\"serial485_de\":",     &conf->serial485_de_pin,               29 },
@@ -696,7 +709,7 @@ static int https_handle_config_post(wiz_tls_context *tls_ctx, const char *body) 
             { "\"serial485_data\":",   &conf->serial_option_485.data_bits,    2  },
             { "\"serial485_parity\":", &conf->serial_option_485.parity,       4  },
             { "\"serial485_flow\":",   &conf->serial_option_485.flow_control, 4  },
-            { "\"serial485_mode\":",   &conf->serial_option_485.protocol,     4  },
+            { "\"serial485_mode\":",   &conf->serial_option_485.protocol,     serial_protocol_max_id() },
         };
         for (int s = 0; s < (int)(sizeof(sfields) / sizeof(sfields[0])); s++) {
             const char *sp = strstr(actual_body, sfields[s].key);
