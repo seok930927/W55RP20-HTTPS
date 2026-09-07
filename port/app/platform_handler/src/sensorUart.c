@@ -117,9 +117,9 @@ static void sensorUart_rs485_rx_isr(void) {
 static void sensorUart_claim(SerialPort *port) {
     serial_port_setup(port);
 
-    if (port->protocol == modbus_rtu) {
-        PRT_INFO("sensorUart: ch%d is Modbus -> handed to modbusMaster\r\n",
-                 port->channel);
+    if ((port->protocol == modbus_rtu) || (port->protocol == protocol_custom)) {
+        PRT_INFO("sensorUart: ch%d protocol=%u -> handed to its own handler\r\n",
+                 port->channel, port->protocol);
         return;
     }
 

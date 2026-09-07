@@ -45,8 +45,8 @@ static uint32_t https_response_sent_ms[MAX_HTTPSOCK] = { 0, };
 static const char PAGE_LOGIN[] =
     "<!DOCTYPE html><html><head><meta charset=UTF-8><title>Login</title>"
     "<style>body{font-family:sans-serif;max-width:360px;margin:60px auto}"
-    "input{width:100%;padding:8px;margin:4px 0;box-sizing:border-box}"
-    "button{width:100%;padding:10px;background:#0055aa;color:#fff;border:none;cursor:pointer}"
+    "input{width:100%%;padding:8px;margin:4px 0;box-sizing:border-box}"
+    "button{width:100%%;padding:10px;background:#0055aa;color:#fff;border:none;cursor:pointer}"
     ".e{color:red;font-size:.9em}</style></head><body>"
     "<h2>Login</h2>"
     "<form method=post action=/login>"
@@ -61,8 +61,8 @@ static const char PAGE_LOGIN[] =
 static const char PAGE_SETUP[] =
     "<!DOCTYPE html><html><head><meta charset=UTF-8><title>\xea\xb3\x84\xec\xa0\x95 \xec\x83\x9d\xec\x84\xb1</title>"
     "<style>body{font-family:sans-serif;max-width:360px;margin:60px auto}"
-    "input{width:100%;padding:8px;margin:4px 0;box-sizing:border-box}"
-    "button{width:100%;padding:10px;background:#0055aa;color:#fff;border:none;cursor:pointer}"
+    "input{width:100%%;padding:8px;margin:4px 0;box-sizing:border-box}"
+    "button{width:100%%;padding:10px;background:#0055aa;color:#fff;border:none;cursor:pointer}"
     ".e{color:red;font-size:.9em}</style></head><body>"
     "<h2>\xea\xb3\x84\xec\xa0\x95 \xec\x83\x9d\xec\x84\xb1</h2>"
     "<form method=post action=/setup>"
@@ -78,8 +78,8 @@ static const char PAGE_SETUP[] =
 static const char PAGE_ACCOUNT[] =
     "<!DOCTYPE html><html><head><meta charset=UTF-8><title>\xea\xb3\x84\xec\xa0\x95 \xea\xb4\x80\xeb\xa6\xac</title>"
     "<style>body{font-family:sans-serif;max-width:400px;margin:60px auto}"
-    "input{width:100%;padding:8px;margin:4px 0;box-sizing:border-box}"
-    "button{width:100%;padding:10px;background:#0055aa;color:#fff;border:none;cursor:pointer}"
+    "input{width:100%%;padding:8px;margin:4px 0;box-sizing:border-box}"
+    "button{width:100%%;padding:10px;background:#0055aa;color:#fff;border:none;cursor:pointer}"
     ".del{background:#cc2200}.e{color:red;font-size:.9em}"
     "ul{padding:0}li{list-style:none;padding:4px 0;border-bottom:1px solid #eee}"
     "</style></head><body>"
@@ -460,11 +460,13 @@ static int https_send_config_json(wiz_tls_context *tls_ctx) {
     n += snprintf(body + n, sizeof(body) - n,
                   "\"serial_intf\":%u,"
                   "\"serial_baud\":%u,\"serial_data\":%u,\"serial_parity\":%u,"
-                  "\"serial_flow\":%u,\"serial_mode\":%u,",
+                  "\"serial_flow\":%u,\"serial_mode\":%u,\"serial_de\":%u,",
                   conf->serial_intf_sel,
                   conf->serial_option.baud_rate, conf->serial_option.data_bits,
                   conf->serial_option.parity, conf->serial_option.flow_control,
-                  conf->serial_option.protocol);
+                  conf->serial_option.protocol,
+                  (conf->serial_de_pin != 0 && conf->serial_de_pin <= 29)
+                  ? conf->serial_de_pin : DATA0_UART_RTS_PIN);
     /* RS-485 (uart0 / serial_option_485) */
     n += snprintf(body + n, sizeof(body) - n,
                   "\"serial485_intf\":%u,\"serial485_de\":%u,"
@@ -686,14 +688,15 @@ static int https_handle_config_post(wiz_tls_context *tls_ctx, const char *body) 
             { "\"serial_data\":",   &conf->serial_option.data_bits,    2  },
             { "\"serial_parity\":", &conf->serial_option.parity,       4  },
             { "\"serial_flow\":",   &conf->serial_option.flow_control, 4  },
-            { "\"serial_mode\":",   &conf->serial_option.protocol,     2  },
+            { "\"serial_mode\":",   &conf->serial_option.protocol,     4  },
+            { "\"serial_de\":",     &conf->serial_de_pin,              29 },
             { "\"serial485_intf\":",   &conf->serial485_intf_sel,             3  },
             { "\"serial485_de\":",     &conf->serial485_de_pin,               29 },
             { "\"serial485_baud\":",   &conf->serial_option_485.baud_rate,    19 },
             { "\"serial485_data\":",   &conf->serial_option_485.data_bits,    2  },
             { "\"serial485_parity\":", &conf->serial_option_485.parity,       4  },
             { "\"serial485_flow\":",   &conf->serial_option_485.flow_control, 4  },
-            { "\"serial485_mode\":",   &conf->serial_option_485.protocol,     2  },
+            { "\"serial485_mode\":",   &conf->serial_option_485.protocol,     4  },
         };
         for (int s = 0; s < (int)(sizeof(sfields) / sizeof(sfields[0])); s++) {
             const char *sp = strstr(actual_body, sfields[s].key);

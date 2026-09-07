@@ -99,7 +99,8 @@ enum protocol {
     protocol_none = 0,
     modbus_rtu = 1,
     modbus_ascii = 2,
-    sec_ups = 3
+    sec_ups = 3,
+    protocol_custom = 4   /* protoTemplate.c — copy it to add your own */
 };
 
 /*  A serial port, as this firmware uses one.
@@ -169,11 +170,21 @@ extern uint8_t * uart_if_table[];
 void uart_set_format_parity(uart_inst_t *uart, uint8_t data_bits, uint8_t stop_bits, uint8_t parity_sel);
 
 void on_uart_rx(void);
-void DEBUG_UART_Configuration(void);
 void DATA0_UART_Configuration(void);
 void DATA0_UART_Deinit(void);
 void DATA0_UART_Interrupt_Enable(void);
+
+/*  Declared once but never written. Left visible rather than deleted so the
+    history of the header stays readable, and walled off so that calling one
+    fails at compile time with this comment in view instead of at link time
+    with an undefined reference.
+
+    DATA1_UART_Configuration  -> serial_port_setup(&g_serial_port[ch])
+    DEBUG_UART_Configuration  -> debug_uart_enable(), behind UART_PIO_DEBUG  */
+#if 0
+void DEBUG_UART_Configuration(void);
 void DATA1_UART_Configuration(void);
+#endif
 
 // XON/XOFF Software flow control: Check the Buffer usage and Send the start/stop commands
 void check_uart_flow_control(uint8_t flow_ctrl);
@@ -185,13 +196,25 @@ void set_uart_rts_pin_high(void);
 void set_uart_rts_pin_low(void);
 #endif
 
+/*  Legacy wrappers on channel 0. New code takes a SerialPort * instead. */
 int32_t platform_uart_putc(uint16_t ch);                    // User Buffer -> UART
+int32_t platform_uart_puts(uint8_t* buf, uint16_t bytes);
+
+/*  Declared once but never written — the same story as the block above.
+    Reading bytes is what bufferHandler.h does, and it takes a channel:
+
+    platform_uart_getc         -> data_buffer_getc(channel)
+    platform_uart_getc_nonblk  -> data_buffer_getc_nonblk(channel)
+    platform_uart_gets         -> data_buffer_gets(buf, bytes, channel)
+    get_byte_from_uart[_it]    -> serial_port_getc(port)                */
+#if 0
 int32_t platform_uart_getc(void);                                 // Ring Buffer -> User
 int32_t platform_uart_getc_nonblk(void);
-int32_t platform_uart_puts(uint8_t* buf, uint16_t bytes);
 int32_t platform_uart_gets(uint8_t* buf, uint16_t bytes);
 uint8_t get_byte_from_uart(void);                        // UART Port -> User
 void get_byte_from_uart_it(void);                        // UART Port -> User (global variable for IRQ handler)
+#endif
+
 /*  Ring buffer API lives in bufferHandler.h, which this header includes. */
 uint8_t get_uart_rs485_sel(void);
 
