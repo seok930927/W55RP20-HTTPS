@@ -39,6 +39,8 @@ bool wizchip_1ms_timer_callback(struct repeating_timer *t) {
     if (callback_ptr != NULL) {
         callback_ptr();
     }
+    /*  The SDK stops a repeating timer when its callback returns false. */
+    return true;
 }
 
 /* Delay */

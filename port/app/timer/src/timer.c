@@ -39,6 +39,10 @@ bool wizchip_1ms_timer_callback(struct repeating_timer *t) {
     if (callback_ptr != NULL) {
         callback_ptr();
     }
+    /*  The SDK stops a repeating timer when its callback returns false, so
+        falling off the end here would leave the 1 ms tick alive only for as
+        long as r0 happened to be non-zero. */
+    return true;
 }
 
 /* Delay */

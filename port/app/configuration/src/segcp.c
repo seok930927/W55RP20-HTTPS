@@ -290,7 +290,10 @@ uint16_t proc_SEGCP(uint8_t* segcp_req, uint8_t* segcp_rep, uint8_t segcp_privil
     uint8_t *temp_buf;
 
     //PRT_SEGCP("SEGCP_REQ : %s\r\n",segcp_req);
-    memset(trep, 0, sizeof(trep));
+    /*  segcp_rep is a caller-owned pointer, so sizeof() here was 4 and only
+        cleared the first word. The reply is measured with strlen() and the
+        caller tests segcp_rep[0], so starting empty is all this needs. */
+    trep[0] = '\0';
     treq = strtok(segcp_req, SEGCP_DELIMETER);
 
     while (treq) {
