@@ -396,18 +396,135 @@ static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
     return https_write_all(tls_ctx, (const unsigned char *)"0\r\n\r\n", 5);
 }
 
+/*  Numeric settings, described once.
+
+    Both directions read this table: https_send_config_json() emits every row
+    and https_handle_config_post() parses every row back. Each field used to be
+    spelled out twice -- once in the GET's format string, once in the POST's
+    sfields[] validator -- with nothing tying the two together. Adding a field
+    to one side only saves but never shows, or shows but never saves, and both
+    halves compile fine either way.
+
+    `width` is filled by sizeof, never by hand, so a row can not disagree with
+    the field it points at. DevConfig is packed: a 1-byte write through a
+    uint16_t field, or the reverse, lands on the neighbour.
+
+    `def` is what the GET reports when the stored value falls outside
+    [min, max] -- an unset port reads as 443, an unset DE pin as the pin this
+    board routes. A CFG_NUM_Z row additionally lets the POST store 0 back, so a
+    field with a board default can be returned to it.  */
+typedef struct {
+    const char *key;        /* JSON key, without the quotes                 */
+    uint8_t     width;      /* sizeof the field: 1 or 2, filled by sizeof   */
+    uint8_t     zero_ok;    /* POST also takes 0, meaning "back to default" */
+    void       *field;
+    uint16_t    min, max;   /* the valid range, in both directions          */
+    uint16_t    def;        /* what the GET shows when the stored value is
+                               outside that range                           */
+} CfgNum;
+
+#define CFG_NUM(key, f, mn, mx, dv) \
+    { key, (uint8_t)sizeof(((DevConfig *)0)->f), 0, &conf->f, mn, mx, dv }
+
+/*  Same, for a field where 0 is the stored "unset" sentinel: the POST takes it
+    so the setting can be put back to the board default, and the GET shows the
+    default rather than the 0. */
+#define CFG_NUM_Z(key, f, mn, mx, dv) \
+    { key, (uint8_t)sizeof(((DevConfig *)0)->f), 1, &conf->f, mn, mx, dv }
+
+#define CFG_NUM_CNT  18
+
+/*  Filled per call rather than declared const: &conf->x is not a constant
+    expression, and serial_mode's upper bound comes from the protocol registry
+    at run time. Returns the number of rows written, never more than `cap`.
+
+    Adding a row means bumping CFG_NUM_CNT with it. CFG_ADD counts rows whether
+    or not they fit, so forgetting shows up as a log line and a short JSON
+    rather than as a write past the end of the caller's array. */
+static int cfg_num_table(DevConfig *conf, CfgNum *t, int cap) {
+    int i = 0;
+    const uint16_t proto_max = serial_protocol_max_id();
+
+#define CFG_ADD(row)                        \
+    do {                                    \
+        if (i < cap) { t[i] = (CfgNum)row; }\
+        i++;                                \
+    } while (0)
+
+    CFG_ADD(CFG_NUM("session_timeout", https_session_timeout_min,
+                    HTTPS_SESSION_TIMEOUT_MIN_MIN, HTTPS_SESSION_TIMEOUT_MIN_MAX,
+                    HTTPS_SESSION_TIMEOUT_MIN_DEFAULT));
+    CFG_ADD(CFG_NUM("https_port", https_port,      1, 65535, HTTPS_PORT_DEFAULT));
+    CFG_ADD(CFG_NUM("snmp_port",  snmp_agent_port, 1, 65535, SNMP_AGENT_PORT_DEFAULT));
+    CFG_ADD(CFG_NUM("snmp_perm",  snmp_perm,       0, SNMP_PERM_NONE, SNMP_PERM_RW));
+
+    /*  RS-232 (uart1 / serial_option). serial_intf comes from the extension
+        section, not from serial_option.uart_interface, which the bootloader
+        rewrites under a different enum. */
+    CFG_ADD(CFG_NUM  ("serial_intf",   serial_intf_sel,            0, 3,  0));
+    CFG_ADD(CFG_NUM_Z("serial_de",     serial_de_pin,              1, 29, DATA0_UART_RTS_PIN));
+    CFG_ADD(CFG_NUM  ("serial_baud",   serial_option.baud_rate,    0, 19, 0));
+    CFG_ADD(CFG_NUM  ("serial_data",   serial_option.data_bits,    0, 2,  0));
+    CFG_ADD(CFG_NUM  ("serial_parity", serial_option.parity,       0, 4,  0));
+    CFG_ADD(CFG_NUM  ("serial_flow",   serial_option.flow_control, 0, 4,  0));
+    CFG_ADD(CFG_NUM  ("serial_mode",   serial_option.protocol,     0, proto_max, 0));
+
+    /* RS-485 (uart0 / serial_option_485) */
+    CFG_ADD(CFG_NUM  ("serial485_intf",   serial485_intf_sel,             0, 3,  0));
+    CFG_ADD(CFG_NUM_Z("serial485_de",     serial485_de_pin,               1, 29, RS485_UART_DE_PIN));
+    CFG_ADD(CFG_NUM  ("serial485_baud",   serial_option_485.baud_rate,    0, 19, 0));
+    CFG_ADD(CFG_NUM  ("serial485_data",   serial_option_485.data_bits,    0, 2,  0));
+    CFG_ADD(CFG_NUM  ("serial485_parity", serial_option_485.parity,       0, 4,  0));
+    CFG_ADD(CFG_NUM  ("serial485_flow",   serial_option_485.flow_control, 0, 4,  0));
+    CFG_ADD(CFG_NUM  ("serial485_mode",   serial_option_485.protocol,     0, proto_max, 0));
+
+#undef CFG_ADD
+
+    if (i > cap) {
+        PRT_SSL("cfg_num_table: %d rows, only %d fit -- bump CFG_NUM_CNT\r\n", i, cap);
+        return cap;
+    }
+    return i;
+}
+
+/*  Both accessors go through the field a byte at a time, little-endian.
+
+    DevConfig is packed, so a uint16_t member can sit at an odd offset —
+    https_port does, right after the 9-byte serial_option_485. Reading or
+    writing one through a uint16_t * emits a 16-bit LDRH/STRH, which HardFaults
+    on Cortex-M0+ when the address is odd. Taking the address as void * and
+    splitting it here keeps every access byte-wide, which is always aligned. */
+static uint16_t cfg_num_get(const CfgNum *e) {
+    const uint8_t *p = (const uint8_t *)e->field;
+    uint16_t v = (e->width == 1) ? p[0] : (uint16_t)(p[0] | (p[1] << 8));
+
+    return (v < e->min || v > e->max) ? e->def : v;
+}
+
+static void cfg_num_set(const CfgNum *e, uint16_t v) {
+    uint8_t *p = (uint8_t *)e->field;
+
+    p[0] = (uint8_t)v;
+    if (e->width == 2) {
+        p[1] = (uint8_t)(v >> 8);
+    }
+}
+
 static int https_send_config_json(wiz_tls_context *tls_ctx) {
     DevConfig *conf = get_DevConfig_pointer();
-    /*  Worst case is ~825 B: the settings, plus the protocol list, which grows
-        with every row added to g_serial_protocol[]. The chain below cannot
-        overrun -- each snprintf is bounded -- but it can truncate, which the
-        check after it catches rather than serving half a JSON object. */
+    /*  Worst case is ~970 B with every field at its longest: ~500 B of names
+        and addresses, ~325 B of numbers, ~135 B of protocol list. The list
+        grows with every row added to g_serial_protocol[] and the numbers with
+        every row added to cfg_num_table(), so about 565 B of headroom is what
+        those two share.
+
+        Each snprintf is bounded, so the chain cannot overrun, but it can
+        truncate -- the check after it catches that rather than serving half a
+        JSON object. */
     char body[1536];
     char header[128];
-    uint16_t sess_min = conf->https_session_timeout_min;
-    if (sess_min < HTTPS_SESSION_TIMEOUT_MIN_MIN || sess_min > HTTPS_SESSION_TIMEOUT_MIN_MAX) {
-        sess_min = HTTPS_SESSION_TIMEOUT_MIN_DEFAULT;
-    }
+    CfgNum nums[CFG_NUM_CNT];
+    int nnum = cfg_num_table(conf, nums, CFG_NUM_CNT);
     int n = 0;
     n += snprintf(body + n, sizeof(body) - n, "{");
     /* Network (network_common / network_option) */
@@ -438,10 +555,9 @@ static int https_send_config_json(wiz_tls_context *tls_ctx) {
     }
     /* SNMP access control — community strings resolve empty => "public" for display. */
     n += snprintf(body + n, sizeof(body) - n,
-                  "\"snmp_community\":\"%s\",\"snmp_perm\":%u,"
+                  "\"snmp_community\":\"%s\","
                   "\"trap_community\":\"%s\",\"trap_accept\":%u,",
                   conf->snmp_community[0] ? conf->snmp_community : SNMP_COMMUNITY_DEFAULT,
-                  conf->snmp_perm,
                   conf->trap_community[0] ? conf->trap_community : SNMP_COMMUNITY_DEFAULT,
                   conf->trap_disable ? 0u : 1u);   /* UI accept: 1=YES(enabled) */
     for (int i = 0; i < WEB_ACCESS_IP_CNT; i++) {
@@ -449,40 +565,17 @@ static int https_send_config_json(wiz_tls_context *tls_ctx) {
         n += snprintf(body + n, sizeof(body) - n,
                       "\"web_ip%d\":\"%u.%u.%u.%u\",", i, ip[0], ip[1], ip[2], ip[3]);
     }
-    n += snprintf(body + n, sizeof(body) - n, "\"session_timeout\":%u,", (unsigned int)sess_min);
-    {
-        uint16_t hp = conf->https_port ? conf->https_port : HTTPS_PORT_DEFAULT;
-        uint16_t sp = conf->snmp_agent_port ? conf->snmp_agent_port : SNMP_AGENT_PORT_DEFAULT;
+    /*  Every numeric setting, straight off the table — session timeout, the two
+        service ports, snmp_perm and both serial blocks. Each row resolves its
+        own out-of-range default, so an unset port reads as 443 and an unset DE
+        pin as the pin this board routes. */
+    for (int i = 0; i < nnum; i++) {
         n += snprintf(body + n, sizeof(body) - n,
-                      "\"https_port\":%u,\"snmp_port\":%u,", (unsigned int)hp, (unsigned int)sp);
+                      "\"%s\":%u,", nums[i].key, (unsigned int)cfg_num_get(&nums[i]));
     }
-    /*  RS-232 (uart1 / serial_option). serial_intf comes from the extension
-        section (serial_intf_sel), not from serial_option.uart_interface, which
-        the bootloader rewrites under a different enum. */
-    n += snprintf(body + n, sizeof(body) - n,
-                  "\"serial_intf\":%u,"
-                  "\"serial_baud\":%u,\"serial_data\":%u,\"serial_parity\":%u,"
-                  "\"serial_flow\":%u,\"serial_mode\":%u,\"serial_de\":%u,",
-                  conf->serial_intf_sel,
-                  conf->serial_option.baud_rate, conf->serial_option.data_bits,
-                  conf->serial_option.parity, conf->serial_option.flow_control,
-                  conf->serial_option.protocol,
-                  (conf->serial_de_pin != 0 && conf->serial_de_pin <= 29)
-                  ? conf->serial_de_pin : DATA0_UART_RTS_PIN);
-    /* RS-485 (uart0 / serial_option_485) */
-    n += snprintf(body + n, sizeof(body) - n,
-                  "\"serial485_intf\":%u,\"serial485_de\":%u,"
-                  "\"serial485_baud\":%u,\"serial485_data\":%u,\"serial485_parity\":%u,"
-                  "\"serial485_flow\":%u,\"serial485_mode\":%u",
-                  conf->serial485_intf_sel,
-                  (conf->serial485_de_pin != 0 && conf->serial485_de_pin <= 29)
-                  ? conf->serial485_de_pin : RS485_UART_DE_PIN,
-                  conf->serial_option_485.baud_rate, conf->serial_option_485.data_bits,
-                  conf->serial_option_485.parity, conf->serial_option_485.flow_control,
-                  conf->serial_option_485.protocol);
     /*  The Mode dropdown is built from this, so the page never carries its own
         copy of the protocol list. */
-    n += snprintf(body + n, sizeof(body) - n, ",\"protocols\":");
+    n += snprintf(body + n, sizeof(body) - n, "\"protocols\":");
     n += serial_protocol_to_json(body + n, (int)(sizeof(body) - n));
     n += snprintf(body + n, sizeof(body) - n, "}");
 
@@ -637,15 +730,7 @@ static int https_handle_config_post(wiz_tls_context *tls_ctx, const char *body) 
             changed = 1;
         }
         {
-            const char *p = strstr(actual_body, "\"snmp_perm\":");
-            if (p) {
-                unsigned int v = 0;
-                if (sscanf(p + strlen("\"snmp_perm\":"), "%u", &v) == 1 && v <= SNMP_PERM_NONE) {
-                    conf->snmp_perm = (uint8_t)v;
-                    changed = 1;
-                }
-            }
-            p = strstr(actual_body, "\"trap_accept\":");
+            const char *p = strstr(actual_body, "\"trap_accept\":");
             if (p) {
                 unsigned int v = 0;
                 if (sscanf(p + strlen("\"trap_accept\":"), "%u", &v) == 1) {
@@ -654,70 +739,30 @@ static int https_handle_config_post(wiz_tls_context *tls_ctx, const char *body) 
                 }
             }
         }
-        const char *ps = strstr(actual_body, "\"session_timeout\":");
-        if (ps) {
-            ps += strlen("\"session_timeout\":");
-            unsigned int v = 0;
-            if (sscanf(ps, "%u", &v) == 1 &&
-                    v >= HTTPS_SESSION_TIMEOUT_MIN_MIN && v <= HTTPS_SESSION_TIMEOUT_MIN_MAX) {
-                conf->https_session_timeout_min = (uint16_t)v;
-                changed = 1;
-            }
-        }
 
-        /*  Service ports (uint16_t, 1..65535). Write DIRECTLY through the packed
-            DevConfig — taking &conf->https_port as a uint16_t* and storing through it
-            loses the packed attribute, producing an unaligned 16-bit STRH that
-            HardFaults on Cortex-M0+ (https_port sits at an odd offset after the
-            9-byte serial_option_485). Direct member writes are emitted byte-safe. */
+        /*  Every numeric setting, off the same table the GET reads. A key the
+            body does not carry is left alone, and a value outside the row's
+            range is dropped rather than stored. The serial ones apply on the
+            next boot, when serial_port_setup() reads them back. */
         {
-            const char *pp = strstr(actual_body, "\"https_port\":");
-            if (pp) {
-                unsigned int v = 0;
-                if (sscanf(pp + strlen("\"https_port\":"), "%u", &v) == 1 && v >= 1 && v <= 65535) {
-                    conf->https_port = (uint16_t)v;
-                    changed = 1;
-                }
-            }
-            pp = strstr(actual_body, "\"snmp_port\":");
-            if (pp) {
-                unsigned int v = 0;
-                if (sscanf(pp + strlen("\"snmp_port\":"), "%u", &v) == 1 && v >= 1 && v <= 65535) {
-                    conf->snmp_agent_port = (uint16_t)v;
-                    changed = 1;
-                }
-            }
-        }
+            CfgNum nums[CFG_NUM_CNT];
+            int nnum = cfg_num_table(conf, nums, CFG_NUM_CNT);
 
-        /*  Serial port settings (#11). Each value validated against its enum range;
-            applied on next boot (DATA0_UART_Configuration / init_rs485_uart read these). */
-        struct {
-            const char *key;
-            uint8_t *field;
-            unsigned int max;
-        } sfields[] = {
-            { "\"serial_intf\":",   &conf->serial_intf_sel,            3  },
-            { "\"serial_baud\":",   &conf->serial_option.baud_rate,    19 },
-            { "\"serial_data\":",   &conf->serial_option.data_bits,    2  },
-            { "\"serial_parity\":", &conf->serial_option.parity,       4  },
-            { "\"serial_flow\":",   &conf->serial_option.flow_control, 4  },
-            { "\"serial_mode\":",   &conf->serial_option.protocol,     serial_protocol_max_id() },
-            { "\"serial_de\":",     &conf->serial_de_pin,              29 },
-            { "\"serial485_intf\":",   &conf->serial485_intf_sel,             3  },
-            { "\"serial485_de\":",     &conf->serial485_de_pin,               29 },
-            { "\"serial485_baud\":",   &conf->serial_option_485.baud_rate,    19 },
-            { "\"serial485_data\":",   &conf->serial_option_485.data_bits,    2  },
-            { "\"serial485_parity\":", &conf->serial_option_485.parity,       4  },
-            { "\"serial485_flow\":",   &conf->serial_option_485.flow_control, 4  },
-            { "\"serial485_mode\":",   &conf->serial_option_485.protocol,     serial_protocol_max_id() },
-        };
-        for (int s = 0; s < (int)(sizeof(sfields) / sizeof(sfields[0])); s++) {
-            const char *sp = strstr(actual_body, sfields[s].key);
-            if (sp) {
-                sp += strlen(sfields[s].key);
+            for (int i = 0; i < nnum; i++) {
+                char key[24];
+                snprintf(key, sizeof(key), "\"%s\":", nums[i].key);
+                const char *sp = strstr(actual_body, key);
+                if (!sp) {
+                    continue;
+                }
+                sp += strlen(key);
                 unsigned int v = 0;
-                if (sscanf(sp, "%u", &v) == 1 && v <= sfields[s].max) {
-                    *sfields[s].field = (uint8_t)v;
+                if (sscanf(sp, "%u", &v) != 1) {
+                    continue;
+                }
+                if ((v >= nums[i].min && v <= nums[i].max) ||
+                        (v == 0 && nums[i].zero_ok)) {
+                    cfg_num_set(&nums[i], (uint16_t)v);
                     changed = 1;
                 }
             }
