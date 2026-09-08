@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdarg.h>
 
 #include "common.h"
 #include "port_common.h"
@@ -396,6 +397,41 @@ static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
     return https_write_all(tls_ctx, (const unsigned char *)"0\r\n\r\n", 5);
 }
 
+/*  Append to a fixed buffer, keeping a running "would have written" total.
+
+    `n += snprintf(buf + n, sizeof(buf) - n, ...)` is the obvious way to build a
+    body up, and it is a trap: snprintf returns the length it WOULD have
+    written, so once the text stops fitting, n keeps growing past the buffer.
+    The next call in the chain then computes sizeof(buf) - n as a size_t, which
+    underflows to about 4 GB, and writes with no bound at all -- so overrunning
+    the buffer by one byte does not truncate the JSON, it smashes the stack.
+
+    This never hands vsnprintf a start or a size outside the buffer, while still
+    accumulating the true length so the caller's truncation check can see how
+    much was really needed. https_send_sensor_json() solves the same problem by
+    repeating an `n < sizeof(chunk)` guard on every call; this chain has enough
+    calls, and 4.2 of the guide invites more, that one bounded helper is safer
+    than a guard the next person has to remember. */
+static void json_appendf(char *buf, size_t cap, int *n, const char *fmt, ...) {
+    va_list ap;
+    size_t used, room;
+    int wrote;
+
+    if (*n < 0) {
+        return;                     /* an earlier call already failed */
+    }
+    used = (size_t)*n;
+    room = (used < cap) ? cap - used : 0;
+
+    va_start(ap, fmt);
+    wrote = vsnprintf(buf + ((used < cap) ? used : cap), room, fmt, ap);
+    va_end(ap);
+
+    if (wrote > 0) {
+        *n += wrote;
+    }
+}
+
 /*  Numeric settings, described once.
 
     Both directions read this table: https_send_config_json() emits every row
@@ -518,66 +554,70 @@ static int https_send_config_json(wiz_tls_context *tls_ctx) {
         every row added to cfg_num_table(), so about 565 B of headroom is what
         those two share.
 
-        Each snprintf is bounded, so the chain cannot overrun, but it can
-        truncate -- the check after it catches that rather than serving half a
-        JSON object. */
+        json_appendf() keeps the chain inside the buffer no matter how far the
+        total runs past it, so overflowing here truncates -- the check after
+        the chain catches that rather than serving half a JSON object. */
     char body[1536];
     char header[128];
     CfgNum nums[CFG_NUM_CNT];
     int nnum = cfg_num_table(conf, nums, CFG_NUM_CNT);
     int n = 0;
-    n += snprintf(body + n, sizeof(body) - n, "{");
+    json_appendf(body, sizeof(body), &n, "{");
     /* Network (network_common / network_option) */
-    n += snprintf(body + n, sizeof(body) - n,
-                  "\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",",
-                  conf->network_common.mac[0], conf->network_common.mac[1],
-                  conf->network_common.mac[2], conf->network_common.mac[3],
-                  conf->network_common.mac[4], conf->network_common.mac[5]);
-    n += snprintf(body + n, sizeof(body) - n,
-                  "\"ip\":\"%u.%u.%u.%u\",\"gateway\":\"%u.%u.%u.%u\","
-                  "\"subnet\":\"%u.%u.%u.%u\",\"dhcp\":%u,",
-                  conf->network_common.local_ip[0], conf->network_common.local_ip[1],
-                  conf->network_common.local_ip[2], conf->network_common.local_ip[3],
-                  conf->network_common.gateway[0], conf->network_common.gateway[1],
-                  conf->network_common.gateway[2], conf->network_common.gateway[3],
-                  conf->network_common.subnet[0], conf->network_common.subnet[1],
-                  conf->network_common.subnet[2], conf->network_common.subnet[3],
-                  conf->network_option.dhcp_use ? 1u : 0u);
+    json_appendf(body, sizeof(body), &n,
+                 "\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",",
+                 conf->network_common.mac[0], conf->network_common.mac[1],
+                 conf->network_common.mac[2], conf->network_common.mac[3],
+                 conf->network_common.mac[4], conf->network_common.mac[5]);
+    json_appendf(body, sizeof(body), &n,
+                 "\"ip\":\"%u.%u.%u.%u\",\"gateway\":\"%u.%u.%u.%u\","
+                 "\"subnet\":\"%u.%u.%u.%u\",\"dhcp\":%u,",
+                 conf->network_common.local_ip[0], conf->network_common.local_ip[1],
+                 conf->network_common.local_ip[2], conf->network_common.local_ip[3],
+                 conf->network_common.gateway[0], conf->network_common.gateway[1],
+                 conf->network_common.gateway[2], conf->network_common.gateway[3],
+                 conf->network_common.subnet[0], conf->network_common.subnet[1],
+                 conf->network_common.subnet[2], conf->network_common.subnet[3],
+                 conf->network_option.dhcp_use ? 1u : 0u);
     for (int i = 0; i < SNMP_ALLOWED_IP_CNT; i++) {
         const uint8_t *ip = conf->snmp_option.allowed_ip[i];
-        n += snprintf(body + n, sizeof(body) - n,
-                      "\"allowed_ip%d\":\"%u.%u.%u.%u\",", i, ip[0], ip[1], ip[2], ip[3]);
+        json_appendf(body, sizeof(body), &n,
+                     "\"allowed_ip%d\":\"%u.%u.%u.%u\",", i, ip[0], ip[1], ip[2], ip[3]);
     }
     for (int i = 0; i < SNMP_TRAP_IP_CNT; i++) {
         const uint8_t *ip = conf->snmp_option.trap_ip[i];
-        n += snprintf(body + n, sizeof(body) - n,
-                      "\"trap_ip%d\":\"%u.%u.%u.%u\",", i, ip[0], ip[1], ip[2], ip[3]);
+        json_appendf(body, sizeof(body), &n,
+                     "\"trap_ip%d\":\"%u.%u.%u.%u\",", i, ip[0], ip[1], ip[2], ip[3]);
     }
     /* SNMP access control — community strings resolve empty => "public" for display. */
-    n += snprintf(body + n, sizeof(body) - n,
-                  "\"snmp_community\":\"%s\","
-                  "\"trap_community\":\"%s\",\"trap_accept\":%u,",
-                  conf->snmp_community[0] ? conf->snmp_community : SNMP_COMMUNITY_DEFAULT,
-                  conf->trap_community[0] ? conf->trap_community : SNMP_COMMUNITY_DEFAULT,
-                  conf->trap_disable ? 0u : 1u);   /* UI accept: 1=YES(enabled) */
+    json_appendf(body, sizeof(body), &n,
+                 "\"snmp_community\":\"%s\","
+                 "\"trap_community\":\"%s\",\"trap_accept\":%u,",
+                 conf->snmp_community[0] ? conf->snmp_community : SNMP_COMMUNITY_DEFAULT,
+                 conf->trap_community[0] ? conf->trap_community : SNMP_COMMUNITY_DEFAULT,
+                 conf->trap_disable ? 0u : 1u);   /* UI accept: 1=YES(enabled) */
     for (int i = 0; i < WEB_ACCESS_IP_CNT; i++) {
         const uint8_t *ip = conf->web_access_ip[i];
-        n += snprintf(body + n, sizeof(body) - n,
-                      "\"web_ip%d\":\"%u.%u.%u.%u\",", i, ip[0], ip[1], ip[2], ip[3]);
+        json_appendf(body, sizeof(body), &n,
+                     "\"web_ip%d\":\"%u.%u.%u.%u\",", i, ip[0], ip[1], ip[2], ip[3]);
     }
     /*  Every numeric setting, straight off the table — session timeout, the two
         service ports, snmp_perm and both serial blocks. Each row resolves its
         own out-of-range default, so an unset port reads as 443 and an unset DE
         pin as the pin this board routes. */
     for (int i = 0; i < nnum; i++) {
-        n += snprintf(body + n, sizeof(body) - n,
-                      "\"%s\":%u,", nums[i].key, (unsigned int)cfg_num_get(&nums[i]));
+        json_appendf(body, sizeof(body), &n,
+                     "\"%s\":%u,", nums[i].key, (unsigned int)cfg_num_get(&nums[i]));
     }
     /*  The Mode dropdown is built from this, so the page never carries its own
         copy of the protocol list. */
-    n += snprintf(body + n, sizeof(body) - n, "\"protocols\":");
-    n += serial_protocol_to_json(body + n, (int)(sizeof(body) - n));
-    n += snprintf(body + n, sizeof(body) - n, "}");
+    json_appendf(body, sizeof(body), &n, "\"protocols\":");
+    /*  Bounded separately: it takes a length, and a non-positive one would
+        underflow inside it exactly as it would here. */
+    if (n > 0 && n < (int)sizeof(body)) {
+        n += serial_protocol_to_json(body + n, (int)(sizeof(body) - n));
+    }
+    json_appendf(body, sizeof(body), &n, "}");
 
     if (n < 0 || n >= (int)sizeof(body)) {
         PRT_SSL("config json truncated at %d bytes -- grow body[]\r\n", n);
