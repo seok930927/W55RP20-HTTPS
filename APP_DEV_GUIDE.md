@@ -49,7 +49,7 @@ SNMP 테이블과 웹 JSON은 전부 여기서 읽어간다.
 | 당신이 하려는 일 | 읽을 곳 |
 |---|---|
 | "웹 화면에 항목 하나만 더 넣고 싶다" | [4.2](#42-웹-설정-항목-추가) |
-| "보드가 바뀌어서 DE 핀 번호만 바꾸면 된다" | [3.3](#33-레시피) — 설정만으로 끝난다. 코드 수정 불필요 |
+| "보드가 바뀌어서 DE 핀 번호만 바꾸면 된다" | [3.5](#35-레시피) — 설정만으로 끝난다. 코드 수정 불필요 |
 | "새 센서(다른 프로토콜)를 붙여야 한다" | [1.1](#11-이-장비가-하는-일) → [3장](#3장-드라이버-계층-api) → [4.4](#44-새-시리얼-프로토콜-추가) |
 | "SNMP OID 를 추가해야 한다" | [4.3](#43-snmp-oid-추가--트랩-추가) |
 | "설정 항목(플래시에 저장되는 값)을 추가해야 한다" | [2.4](#24-devconfig-이중구조--legacy-vs-ext) → [4.1](#41-devconfig-ext-에-설정-필드-추가) |
@@ -64,7 +64,7 @@ SNMP 테이블과 웹 JSON은 전부 여기서 읽어간다.
 | **최초 1회 필수** | ioLibrary 서브모듈에 `ioLibrary_snmp_patch.patch` 적용 — [Setup.md](Setup.md) 3절 참조. 안 하면 SNMP 가 통째로 안 붙는다 |
 | 보드 선택 | [CMakeLists.txt:39](CMakeLists.txt#L39) `set(BOARD_NAME PLATYPUS_S2E)` |
 | 빌드 결과물 | `bin_files/Boot-App_linker_Merged.uf2` (BOOTSEL 로 이 파일 하나 넣으면 부트+앱 전체) |
-| 빌드 타입 | Release, `-O3 -DNDEBUG` — **`assert()` 는 무효화되어 있다** ([5.9](#59-configassert-는-릴리스에서-무효다) 참조) |
+| 빌드 타입 | Release, `-O3 -DNDEBUG` — **`assert()` 는 무효화되어 있다** ([5.9](#59-configassert-는-릴리스에서-무효다--태스크-우선순위가-조용히-잘린다) 참조) |
 
 ## 1.4 용어
 
@@ -169,7 +169,7 @@ SNMP 테이블과 웹 JSON은 전부 여기서 읽어간다.
 |---|---|---|---|---|---|---|
 | `Start_Task` | `start_task` | [App.c:201](main/App/App.c#L201) | 65 | **31** ⚠ | 512 / 2 KB | 초기화 후 self-delete |
 | `Net_Status_Task` | `net_status_task` | [netHandler.c:40](port/app/platform_handler/src/netHandler.c#L40) | 8 | 8 | 1024 / 4 KB | PHY 링크 감시, DHCP 갱신 |
-| `http_webserver_task` | `http_webserver_task` | [httpHandler.c:1257](port/app/platform_handler/src/httpHandler.c#L1257) | 23 | 23 | 2048 / 8 KB | HTTPS 서버 (소켓 4·5·6) |
+| `http_webserver_task` | `http_webserver_task` | [httpHandler.c:1358](port/app/platform_handler/src/httpHandler.c#L1358) | 23 | 23 | 2048 / 8 KB | HTTPS 서버 (소켓 4·5·6) |
 | `SNMP_Agent_Task` | `snmp_agent_task` | [snmpHandler.c:119](port/app/platform_handler/src/snmpHandler.c#L119) | 7 | 7 | 2048 / 8 KB | SNMP 요청 처리 + 트랩 송신 (소켓 7) |
 | `SEGCP_udp_Task` | `segcp_udp_task` | [segcp.c:1709](port/app/configuration/src/segcp.c#L1709) | 52 | **31** ⚠ | 1024 / 4 KB | 설정툴 UDP 검색 (소켓 1) |
 | `SEGCP_tcp_Task` | `segcp_tcp_task` | [segcp.c:1724](port/app/configuration/src/segcp.c#L1724) | 51 | **31** ⚠ | 1024 / 4 KB | 설정툴 TCP 접속 (소켓 2) |
@@ -179,7 +179,7 @@ SNMP 테이블과 웹 JSON은 전부 여기서 읽어간다.
 | `Tmr Svc` | (FreeRTOS 내장) | — | 31 | 31 | 1024 / 4 KB | 소프트웨어 타이머 |
 | `Heap_Monitor_Task` | `heap_monitor_task` | [App.c:191](main/App/App.c#L191) | 6 | — | 1024 / 4 KB | **주석 처리됨** ([App.c:292](main/App/App.c#L292)) |
 
-⚠ **`configMAX_PRIORITIES` 가 32라서 32 이상은 전부 31로 잘린다.** 상세는 [5.9](#59-configassert-는-릴리스에서-무효다).
+⚠ **`configMAX_PRIORITIES` 가 32라서 32 이상은 전부 31로 잘린다.** 상세는 [5.9](#59-configassert-는-릴리스에서-무효다--태스크-우선순위가-조용히-잘린다).
 
 ### FreeRTOS 설정 요약 ([FreeRTOSConfig.h](port/app/FreeRTOS-Kernel/inc/FreeRTOSConfig.h))
 
@@ -303,10 +303,10 @@ snmp_agent_task()  (10 ms 주기)
 | 엔드포인트 | 메서드 | 핸들러 | 내용 |
 |---|---|---|---|
 | `/` | GET | `handle_get_root` | `Web_page.h` 통째로 전송 (세션 필요) |
-| `/api/sensors` | GET | [`https_send_sensor_json`:301](port/app/platform_handler/src/httpHandler.c#L301) | device bank → JSON, **chunked 스트리밍** (RAM 에 전체를 안 만듦) |
-| `/api/config` | GET | [`https_send_config_json`:398](port/app/platform_handler/src/httpHandler.c#L398) | DevConfig → JSON (`body[1024]` 한 방에 조립) |
-| `/api/config` | POST | [`https_handle_config_post`:514](port/app/platform_handler/src/httpHandler.c#L514) | JSON 파싱 → DevConfig 갱신 → 저장 → GET 과 같은 JSON 응답 |
-| `/api/accounts*`, `/login`, `/setup`, `/logout`, `/api/reboot` | | [dispatch_request:1125](port/app/platform_handler/src/httpHandler.c#L1125) | 계정·세션·리부트 |
+| `/api/sensors` | GET | [`https_send_sensor_json`:303](port/app/platform_handler/src/httpHandler.c#L303) | device bank → JSON, **chunked 스트리밍** (RAM 에 전체를 안 만듦) |
+| `/api/config` | GET | [`https_send_config_json`:549](port/app/platform_handler/src/httpHandler.c#L549) | DevConfig → JSON (`body[1536]` 한 방에 조립) |
+| `/api/config` | POST | [`https_handle_config_post`:662](port/app/platform_handler/src/httpHandler.c#L662) | JSON 파싱 → DevConfig 갱신 → 저장 → GET 과 같은 JSON 응답 |
+| `/api/accounts*`, `/login`, `/setup`, `/logout`, `/api/reboot` | | [dispatch_request:1226](port/app/platform_handler/src/httpHandler.c#L1226) | 계정·세션·리부트 |
 
 ### 2.3.4 소켓 배정 ([common.h:25-47](port/app/configuration/inc/common.h#L25-L47))
 
@@ -511,7 +511,7 @@ SerialPort *q = &g_serial_port[SEG_DATA1_CH];   /* RS-485 포트 (uart0) */
 |---|---|---|
 | `void serial_port_init_all(void)` | **두 포트를 설정에서 전부 세운다** | 부팅 시 `check_mac_address()` **앞에서** 한 번. 이게 `opt` 를 채운다 |
 | `void serial_port_setup(SerialPort *port)` | 한 포트만 다시 세운다 | **여러 번 불러도 안전.** 내부에서 `uart_deinit()` 후 재초기화. 범위 밖 설정값은 DevConfig 를 기본값으로 되돌려 쓴다(부작용 있음) |
-| `void uart_set_format_parity(uart_inst_t *uart, uint8_t data_bits, uint8_t stop_bits, uint8_t parity_sel)` | 데이터/스톱/패리티. **space·mark(stick parity) 지원** | `parity_sel` 은 `uart_parity_t` 가 아니라 **`enum parity`**. pico-sdk `uart_set_format()` 대신 항상 이걸 써라 ([5.7](#57-stick-parityspacemark-는-pico-sdk-로는-안-된다)) |
+| `void uart_set_format_parity(uart_inst_t *uart, uint8_t data_bits, uint8_t stop_bits, uint8_t parity_sel)` | 데이터/스톱/패리티. **space·mark(stick parity) 지원** | `parity_sel` 은 `uart_parity_t` 가 아니라 **`enum parity`**. pico-sdk `uart_set_format()` 대신 항상 이걸 써라 ([5.7](#57-stick-parityspacemark는-pico-sdk-로는-안-된다)) |
 
 `serial_port_setup()` 이 하는 일 ([uartHandler.c:163~](port/app/platform_handler/src/uartHandler.c#L163)):
 
@@ -767,7 +767,7 @@ if ((port->channel == SEG_DATA0_CH) && (opmode == DEVICE_AT_MODE)) {
 | [uartHandler.h](port/app/platform_handler/inc/uartHandler.h) | enum 정의 |
 | [uartHandler.c:29-37](port/app/platform_handler/src/uartHandler.c#L29-L37) | 문자열/값 테이블 |
 | [Web_page.html](port/app/html_file/Web_page.html) | `<option value=…>` 목록 |
-| [httpHandler.c:683-696](port/app/platform_handler/src/httpHandler.c#L683-L696) | `sfields[]` POST 검증 상한 |
+| [httpHandler.c:480-524](port/app/platform_handler/src/httpHandler.c#L480-L524) | `cfg_num_table()` — POST 검증 범위와 GET 표시 기본값 |
 | [ConfigData.c](port/app/configuration/src/ConfigData.c) | 팩토리 기본값 |
 | [segcp.c](port/app/configuration/src/segcp.c) | 설정툴(SEGCP) 프로토콜 표시/파싱 |
 
@@ -789,6 +789,290 @@ if ((port->channel == SEG_DATA0_CH) && (opmode == DEVICE_AT_MODE)) {
 > 기존 장비의 `reserved_ext[]` 는 전부 0 이다. 필드가 그 자리에 생기면 초기값이 0 이 된다.
 > `0 = 활성` 같은 의미를 주면 업데이트한 순간 동작이 바뀐다.
 > 실제 예: `serial_de_pin` 은 `0 = 미설정 → 보드 기본값`, `snmp_perm` 은 `0 = R/W(기존 동작)`.
+
+### 체크리스트
+
+| # | 파일 | 할 일 |
+|---|---|---|
+| 1 | [ConfigData.h](port/app/configuration/inc/ConfigData.h) | `reserved_ext[]` **바로 앞**에 필드 추가. 위치는 항상 끝(reserved 직전) |
+| 2 | [ConfigData.h:217](port/app/configuration/inc/ConfigData.h#L217) | `DEVCONFIG_RESERVED_EXT_SIZE` 를 추가 바이트만큼 감소 |
+| 3 | [ConfigData.h:210-216](port/app/configuration/inc/ConfigData.h#L210-L216) | 위 계산식 주석에 뺄셈 항 추가 (다음 사람을 위해) |
+| 4 | [ConfigData.c: `set_DevConfig_ext_to_factory_value()`](port/app/configuration/src/ConfigData.c#L220) | 팩토리 기본값 대입 |
+| 5 | (필요시) [ConfigData.h:208](port/app/configuration/inc/ConfigData.h#L208) | **0 이 기존 동작과 다르면** `DEVCONFIG_EXT_VERSION` 을 +1 하고 `ext_version history` 주석에 한 줄 추가 → 기존 장비의 EXT 가 팩토리 값으로 재초기화된다 |
+| 6 | 웹에 노출한다면 | [4.2](#42-웹-설정-항목-추가) 로 진행 |
+
+### 검증
+
+```bash
+# 반드시 1596 이 나와야 한다 (필드 추가 전후 동일)
+```
+```c
+/* ConfigData.h 맨 아래에 임시로 넣고 빌드해보면 즉시 잡힌다 */
+_Static_assert(sizeof(DevConfig) == 1596, "DevConfig layout changed!");
+```
+
+| ☐ | 항목 |
+|---|---|
+| ☐ | `sizeof(DevConfig)` 가 1596 그대로인가 |
+| ☐ | `reserved_ext` 크기를 정확히 줄였는가 |
+| ☐ | 새 필드가 `reserved_ext` **앞**에 있는가 (뒤에 두면 기존 장비에서 0 이 아닌 쓰레기를 읽는다) |
+| ☐ | 값 0 이 기존 동작인가? 아니면 `ext_version` 을 올렸는가 |
+| ☐ | LEGACY 구역은 **손대지 않았는가** (설정툴/부트로더가 오프셋에 의존) |
+
+### 실제 사례 — `serial_de_pin` 추가
+
+```diff
+-#define DEVCONFIG_RESERVED_EXT_SIZE    52
++#define DEVCONFIG_RESERVED_EXT_SIZE    51
+
+     uint8_t  serial485_de_pin;
++    /*  uart1 RS-485 DE / nRE GPIO number. Same 0-means-unset rule as above;
++        0 => board default DATA0_UART_RTS_PIN. */
++    uint8_t  serial_de_pin;
+```
+```diff
+     dev_config.serial485_de_pin = RS485_UART_DE_PIN;
++    dev_config.serial_de_pin = DATA0_UART_RTS_PIN;
+```
+`ext_version` 을 안 올린 이유: **0 이면 보드 기본값**이라 기존 장비 동작이 그대로다.
+
+---
+
+## 4.2 웹 설정 항목 추가
+
+**숫자 설정**이면 3곳이면 끝난다. 문자열·IP 는 여전히 4곳이다.
+
+```
+ ① HTML 입력 필드  ──►  ② Web_page.h 재생성
+                             │
+ ③ cfg_num_table() 에 CFG_NUM 한 줄
+      └─► GET 직렬화와 POST 파싱·검증이 그 한 줄에서 같이 나온다
+```
+
+예전에는 GET 의 `snprintf` 체인과 POST 의 `sfields[]` 에 **따로** 적어야 했다.
+한쪽만 적으면 저장은 되는데 화면에 안 뜨거나, 화면엔 뜨는데 저장이 안 됐고,
+**양쪽 다 컴파일은 통과했다.** 지금은 한 줄이라 어긋날 수가 없다.
+
+### 체크리스트 — 숫자 설정
+
+| # | 파일 | 할 일 |
+|---|---|---|
+| 1 | [Web_page.html](port/app/html_file/Web_page.html) | `<input id="…">` 또는 `<select id="…">` 추가. **id 가 JSON 키가 된다** |
+| 2 | [Web_page.html:790-794](port/app/html_file/Web_page.html#L790-L794) | 시리얼 항목이면 `CFG_SERIAL[]`, IP 항목이면 `CFG_IPS[]` 에 id 추가 → load/save 자동 처리 |
+| 3 | (그 외 항목) | [`loadConfig()`:810](port/app/html_file/Web_page.html#L810) 과 [`saveConfig()`:853](port/app/html_file/Web_page.html#L853) 에 개별 라인 추가 |
+| 4 | **재생성** | `py -3 tools/html_to_c_header.py` (프로젝트 루트에서) |
+| 5 | [httpHandler.c: `cfg_num_table()`:480](port/app/platform_handler/src/httpHandler.c#L480) | `CFG_NUM` 한 줄 추가 |
+| 6 | [httpHandler.c:471](port/app/platform_handler/src/httpHandler.c#L471) | `CFG_NUM_CNT` 를 **행 수와 함께** +1 |
+| 7 | [4.1](#41-devconfig-ext-에-설정-필드-추가) | 플래시에 저장되는 값이면 DevConfig 필드부터 |
+
+### ①,② HTML → Web_page.h
+
+`Web_page.html` 을 고치면 **반드시** 헤더를 재생성해야 한다.
+
+```bash
+py -3 tools/html_to_c_header.py
+```
+
+| 사실 | 내용 |
+|---|---|
+| 출력 | `port/app/html_file/Web_page.h` — `static const unsigned char _acWeb_page[…]` |
+| CMake 자동화 | [CMakeLists.txt:150-159](CMakeLists.txt#L150-L159) 의 `html_to_c_header` 타겟이 `Boot`, `App_linker` 빌드 전에 자동 실행 |
+| ⚠ 함정 | 의존성이 걸린 건 `App_linker` 이고 **`App` 타겟에는 안 걸려 있다.** `App` 만 빌드하면 재생성이 안 된다 |
+| 커밋 | `Web_page.h` 는 **git 에 추적되는 생성물**이다. HTML 과 같이 커밋해야 한다 |
+
+### ③ `CFG_NUM` 한 줄
+
+```c
+/* httpHandler.c 의 cfg_num_table() 안 */
+CFG_ADD(CFG_NUM("my_field", my_field, 0, 7, 0));
+/*               │          │         │  │  └ GET 이 범위 밖 값을 만났을 때 보여줄 값
+                 │          │         │  └─── POST 허용 최댓값
+                 │          │         └────── POST 허용 최솟값
+                 │          └──────────────── DevConfig 멤버 이름
+                 └─────────────────────────── JSON 키 = HTML 의 id           */
+```
+
+| 인자 | 뜻 |
+|---|---|
+| `key` | JSON 키. HTML 의 `id` 와 **글자까지 같아야** 폼이 채워진다 |
+| `f` | `DevConfig` 멤버 이름. `width` 는 `sizeof` 로 자동으로 채워진다 — 손으로 적지 않는다 |
+| `mn`, `mx` | POST 가 받아주는 범위. 벗어난 값은 **저장하지 않고 버린다** |
+| `dv` | GET 이 범위 밖 저장값을 만났을 때 대신 내보낼 값 |
+
+**0 이 "미설정" 인 필드**는 `CFG_NUM_Z` 를 쓴다. POST 가 0 도 받아서 보드 기본값으로
+되돌릴 수 있고, GET 은 0 대신 `dv` 를 보여준다.
+
+```c
+CFG_ADD(CFG_NUM_Z("serial_de", serial_de_pin, 1, 29, DATA0_UART_RTS_PIN));
+```
+
+> ⚠ **행을 추가하면 [`CFG_NUM_CNT`:471](port/app/platform_handler/src/httpHandler.c#L471) 도 같이 올려라.**
+> 안 올리면 넘친 행이 조용히 빠지고 `cfg_num_table: N rows, only M fit` 로그가 뜬다.
+> 배열 밖으로 쓰지는 않는다 ([`CFG_ADD`:484](port/app/platform_handler/src/httpHandler.c#L484) 가 막는다).
+
+### ④ 숫자가 아닌 값 — 손으로 붙인다
+
+문자열·IPv4·의미가 뒤집힌 값(`dhcp_use`, `trap_disable`)은 테이블에 안 들어간다.
+[`https_send_config_json()`:549](port/app/platform_handler/src/httpHandler.c#L549) 과
+[`https_handle_config_post()`:662](port/app/platform_handler/src/httpHandler.c#L662) 양쪽에 직접 적어야 한다.
+
+**패턴 A — 문자열.** [`parse_json_str()`:641](port/app/platform_handler/src/httpHandler.c#L641) 사용.
+
+```c
+if (parse_json_str(actual_body, "\"my_str\":", conf->my_str, sizeof(conf->my_str))) {
+    changed = 1;
+}
+```
+
+**패턴 B — IPv4.** [`netf[]`:695](port/app/platform_handler/src/httpHandler.c#L695) 또는
+[`web_ip%d` 루프:727](port/app/platform_handler/src/httpHandler.c#L727) 패턴을 복사.
+
+> ⚠ **packed 구조체 멤버의 주소를 `uint16_t *` 로 잡아 쓰지 마라.**
+> `DevConfig` 는 `packed` 라서 `uint16_t` 멤버가 홀수 오프셋에 앉는다 — `https_port` 가 그렇다
+> (9바이트 `serial_option_485` 바로 뒤). 비정렬 `LDRH`/`STRH` 가 나와 Cortex-M0+ 에서 **HardFault** 한다.
+> 멤버에 직접 대입(`conf->필드 = 값;`)하거나, 테이블처럼 **바이트 단위로 쪼개라**
+> ([`cfg_num_get()`/`cfg_num_set()`:533](port/app/platform_handler/src/httpHandler.c#L533) 참조).
+
+### 버퍼 크기 표 (넘치면 조용히 잘린다)
+
+| 버퍼 | 크기 | 위치 | 넘치면 |
+|---|---|---|---|
+| `https_rx_buf[]` | 2048 | [httpHandler.c:26](port/app/platform_handler/src/httpHandler.c#L26) | 요청 헤더+본문 잘림 |
+| `post_extra_buf[]` | 1536 | [httpHandler.c:666](port/app/platform_handler/src/httpHandler.c#L666) | **뒤쪽 필드가 조용히 누락, UI 는 "저장 완료"** ([5.3](#53-post-본문이-버퍼보다-길면-뒤쪽-필드가-조용히-사라진다)) |
+| `body[]` (config GET) | 1536 | [httpHandler.c:560](port/app/platform_handler/src/httpHandler.c#L560) | 현재 최악 약 970 B, 여유 약 565 B |
+| `chunk[]` (sensor GET) | 512 | [httpHandler.c:320](port/app/platform_handler/src/httpHandler.c#L320) | 해당 device 항목만 건너뜀 |
+
+`body[]` 의 여유는 **`cfg_num_table()` 의 행과 `g_serial_protocol[]` 의 행이 같이 나눠 쓴다.**
+설정을 늘리든 프로토콜을 늘리든 같은 565 B 를 깎아 먹는다.
+
+### 최종 확인
+
+| ☐ | 항목 |
+|---|---|
+| ☐ | `py -3 tools/html_to_c_header.py` 실행했는가 |
+| ☐ | `Web_page.h` 를 커밋에 포함했는가 |
+| ☐ | HTML 의 `id` 와 `CFG_NUM` 의 `key` 가 **글자까지 같은가** (`loadConfig()` 가 GET 응답으로 폼을 채운다) |
+| ☐ | `CFG_NUM_CNT` 를 행 수와 함께 올렸는가 |
+| ☐ | `mn`/`mx` 가 enum 최댓값과 맞는가 |
+| ☐ | `body[]` 와 `post_extra_buf` 에 여유가 있는가 |
+| ☐ | 재부팅이 필요한 항목이면 HTML 섹션 제목에 "(재부팅 후 적용)" 을 넣었는가 |
+
+---
+
+## 4.3 SNMP OID 추가 / 트랩 추가
+
+> ⚠ SNMP 코드는 **서브모듈(`libraries/ioLibrary_Driver`) 안**에 있다.
+> 고치면 반드시 `ioLibrary_snmp_patch.patch` 를 재생성해야 한다 ([6.2](#62-서브모듈-패치-워크플로)).
+
+### 4.3.1 먼저 확인 — 값 컬럼만 늘리면 되는 경우가 대부분이다
+
+장치마다 노출하는 값(온도/습도/알람)을 **하나 더 늘리는 것**이라면 SNMP 코드를 건드릴 필요가 없다.
+테이블은 `DEVICE_VALUE_COLS` 에서 자동 생성된다.
+
+| # | 파일 | 할 일 |
+|---|---|---|
+| 1 | [sensor.h:32](port/app/platform_handler/inc/sensor.h#L32) | `DEVICE_VALUE_COLS` 를 3 → 4 |
+| 2 | [sensor.c:11-15](port/app/platform_handler/src/sensor.c#L11-L15) | `g_value_columns[]` 에 `{ "Pressure", "hPa", -1 }` 추가 (배열 길이 = `DEVICE_VALUE_COLS`) |
+| 3 | — | SNMP 테이블·웹 JSON·UART S/T/R 컬럼 수가 **자동으로** 따라온다 |
+
+제약:
+
+| 제약 | 값 | 이유 |
+|---|---|---|
+| `DEVICE_COUNT` ≤ 127 | 현재 64 | 셀 OID 서브식별자가 1바이트를 유지해야 함 |
+| `2 + DEVICE_VALUE_COLS` ≤ 127 | 현재 5 | 〃 |
+| `snmpData[]` 크기 | `7 + (2+COLS)×ROWS` | 컬럼 하나 늘 때마다 64 엔트리 증가 = **RAM 약 +5.6 KB** |
+
+> RAM 여유를 확인하라. 힙은 96 KB 이고 `snmpData[]` 는 정적(.bss) 이다.
+
+### 4.3.2 새 OID 서브트리를 추가하는 경우
+
+| # | 파일 | 할 일 |
+|---|---|---|
+| 1 | [snmp_custom.c: `initTable()`:92](libraries/ioLibrary_Driver/Internet/SNMP/snmp_custom.c#L92) | 엔트리 채우기 (`oidlen`, `oid[]`, `dataType`, `dataLen`, `u.*`) |
+| 2 | [snmp_custom.c:47-48](libraries/ioLibrary_Driver/Internet/SNMP/snmp_custom.c#L47-L48) | `snmpData[]` 배열 크기와 `maxData` 를 함께 늘림 |
+| 3 | **OID 순서** | 새 엔트리가 **오름차순 위치**에 들어가야 한다 ([5.6](#56-snmpdata-는-oid-오름차순이어야-한다)) |
+| 4 | `oidlen` | **`MAX_OID = 12` 를 넘으면 안 된다** ([snmp.h:17](libraries/ioLibrary_Driver/Internet/SNMP/snmp.h#L17)). 여유 없음 |
+| 5 | 값 동기화 | 동적 값이면 `snmp_custom_refresh()`(:131) 에 갱신 코드 추가, 또는 `getfunction` 콜백 등록 |
+| 6 | 패치 재생성 | [6.2](#62-서브모듈-패치-워크플로) |
+
+`dataEntryType` 필드 ([snmp.h:99-110](libraries/ioLibrary_Driver/Internet/SNMP/snmp.h#L99-L110)):
+
+| 필드 | 의미 |
+|---|---|
+| `oidlen` / `oid[12]` | BER 인코딩된 OID (첫 바이트 `0x2b` = `1.3`) |
+| `dataType` | `SNMPDTYPE_INTEGER`(0x02), `_OCTET_STRING`(0x04), `_OBJ_ID`(0x06), `_TIME_TICKS`(0x43) … |
+| `dataLen` | INTEGER 는 4, OCTET STRING 은 실제 길이 (최대 `MAX_STRING`=64) |
+| `u.intval` / `u.octetstring[64]` | 값 |
+| `getfunction(void*, uint8_t*)` | 읽을 때 호출 (예: `currentUptime`) |
+| `setfunction(int32_t)` | SET 요청 처리. **NULL 이면 읽기 전용** |
+
+Enterprise 번호(22210)가 박혀 있는 곳 — 바꾸려면 **전부** 고쳐야 한다:
+
+| 위치 | 내용 |
+|---|---|
+| [snmp_custom.c:59-60](libraries/ioLibrary_Driver/Internet/SNMP/snmp_custom.c#L59-L60) | `ENTRY_OID_PREFIX[10]` — deviceEntry |
+| [snmp_custom.c:63-64](libraries/ioLibrary_Driver/Internet/SNMP/snmp_custom.c#L63-L64) | `NOTIFY_OID[10]` — 트랩 |
+| [snmp_custom.c:97-98](libraries/ioLibrary_Driver/Internet/SNMP/snmp_custom.c#L97-L98) | `sysObjectID` — **이스케이프 문자열** `"\x2b…\x81\xad\x42\x01\x00"` |
+| [snmp_custom.c:198-199](libraries/ioLibrary_Driver/Internet/SNMP/snmp_custom.c#L198-L199) | `initial_Trap()` 의 두 OID |
+
+> 22210 은 BER 3바이트(`81 AD 42`)로 인코딩된다. **다른 번호로 바꾸면 인코딩 길이가 달라져 `oidlen` 이 전부 틀어질 수 있다.**
+
+### 4.3.3 트랩 추가
+
+기존 경로:
+
+```
+  누군가 ──► snmp_notify_device(dev)      [어느 태스크에서든 안전, 큐에 넣기만]
+                    │  ring queue 32칸
+  snmp_agent_task ──► snmp_flush_traps()  ──► 컬럼마다 snmp_custom_sendValueTrap()
+```
+
+| # | 할 일 | 위치 |
+|---|---|---|
+| 1 | 트랩을 쏘고 싶은 지점에서 `snmp_notify_device(dev)` 호출 | 예: [sensorUart.c:214](port/app/platform_handler/src/sensorUart.c#L214) (T 명령) |
+| 2 | 새로운 종류의 트랩이면 `snmp_custom_sendValueTrap()` 을 본떠 함수 추가 | [snmp_custom.c:159](libraries/ioLibrary_Driver/Internet/SNMP/snmp_custom.c#L159) |
+| 3 | 트랩 목적지는 `snmp_option.trap_ip[4]`, 0.0.0.0 슬롯은 건너뜀 | [snmpHandler.c:107-111](port/app/platform_handler/src/snmpHandler.c#L107-L111) |
+
+주의:
+
+| ☐ | 항목 |
+|---|---|
+| ☐ | 트랩 송신은 **`snmp_agent_task` 안에서만** — 트랩 소켓(소켓 0)을 공유하므로 |
+| ☐ | 큐가 꽉 차면 조용히 버린다 (32칸) |
+| ☐ | `trap_disable` 이 1 이면 큐만 비우고 안 보낸다 |
+| ☐ | 트랩 community 는 `snmp_get_trap_community()` 로 얻는다 (에이전트 community 와 별개) |
+
+### 4.3.4 런타임 SNMP 설정 API
+
+앱 → SNMP 코어로 값을 주입하는 함수들. 전부 `snmpd_run()` 전에 호출해야 한다.
+호출처: [`snmp_agent_init()` snmpHandler.c:43](port/app/platform_handler/src/snmpHandler.c#L43)
+
+| 함수 | 인자 | 기본 동작 |
+|---|---|---|
+| `snmp_set_agent_port(uint16_t)` | 0 이면 무시 | 161 |
+| `snmp_set_allowed_ips(const uint8_t[4][4])` | 전부 0 → 모두 허용 | 모두 허용 |
+| `snmp_set_community(const char*)` | `""`/NULL → `"public"` | `"public"` |
+| `snmp_set_permission(uint8_t)` | 0=R/W, 1=R/O, 2=차단 | R/W |
+| `snmp_set_trap_community(const char*)` | 〃 | `"public"` |
+| `snmp_get_trap_community(void)` | — | — |
+
+설정 변경 후 **재적용**: 웹 POST 가 `snmp_request_reinit()` 을 부르면 소켓이 닫히고 다음 사이클에 `snmp_agent_init()` 이 다시 돈다 ([httpHandler.c:813](port/app/platform_handler/src/httpHandler.c#L813)).
+
+---
+
+## 4.4 새 시리얼 프로토콜 추가
+
+**[protoTemplate.c](port/app/platform_handler/src/protoTemplate.c) 를 복사해서 시작하라.** 빌드되는 상태로 들어 있고, 포트 세팅·DE 제어·AT 모드 양보·뱅크 등록이 이미 되어 있다. 채울 곳은 `protoTemplate_poll()` 안의 TODO 두 개뿐이다. 웹 Mode 드롭다운의 **Custom**(값 4)이 이 파일에 묶여 있다.
+
+### 두 가지 구현 스타일
+
+| 스타일 | 언제 | 예시 | 특징 |
+|---|---|---|---|
+| **동기 폴러** | 마스터로서 우리가 먼저 묻는다 | `modbusMaster.c` | RX ISR 없음. 태스크가 직접 FIFO 를 훑음. 단순함 |
+| **ISR + 파서 태스크** | 상대가 언제든 보낸다 | `sensorUart.c` | RX ISR → 링버퍼 → 세마포어 → 태스크 |
+
+새 프로토콜은 대개 **동기 폴러**가 맞다.
 
 ### 체크리스트
 
@@ -816,7 +1100,7 @@ if ((port->channel == SEG_DATA0_CH) && (opmode == DEVICE_AT_MODE)) {
 |---|---|
 | `task` 가 `NULL` | 전용 핸들러 없음 → sensorUart 가 그 포트를 잡고 S/T/R 을 돌린다 |
 | `stack` | 워드 단위 (`xTaskCreate` 와 같은 단위) |
-| `priority` | **31 이하** ([5.9](#59-configassert-는-릴리스에서-무효다)) |
+| `priority` | **31 이하** ([5.9](#59-configassert-는-릴리스에서-무효다--태스크-우선순위가-조용히-잘린다)) |
 
 ### 골격 코드
 
@@ -872,7 +1156,7 @@ void myproto_task(void *argument) {
 | ☐ | 수신 대기 루프에서 **`vTaskDelay()` 로 양보**하라. 바쁜 대기는 워치독을 굶긴다 |
 | ☐ | RX FIFO 는 32바이트다. 그보다 긴 프레임은 대기 중에도 계속 긁어와야 한다 |
 | ☐ | 그 포트를 가져가면 `sensorUart_claim()` 이 비키도록 조건을 추가하라 |
-| ☐ | 새 태스크 우선순위는 **31 이하** ([5.9](#59-configassert-는-릴리스에서-무효다)) |
+| ☐ | 새 태스크 우선순위는 **31 이하** ([5.9](#59-configassert-는-릴리스에서-무효다--태스크-우선순위가-조용히-잘린다)) |
 
 ---
 
