@@ -281,6 +281,14 @@ void start_task(void *argument) {
     net_segcp_tcp_sem = xSemaphoreCreateCounting((unsigned portBASE_TYPE)0x7fffffff, (unsigned portBASE_TYPE)0);
     segcp_udp_sem = xSemaphoreCreateCounting((unsigned portBASE_TYPE)0x7fffffff, (unsigned portBASE_TYPE)0);
     segcp_tcp_sem = xSemaphoreCreateCounting((unsigned portBASE_TYPE)0x7fffffff, (unsigned portBASE_TYPE)0);
+    /*  Wakes segcp_serial_task: the RS-232 ISR gives it once the +++ escape has
+        been recognised, and again for every byte while AT mode is on.
+
+        It has to exist before that task is created below. segcp_serial_task
+        blocks on it immediately, and configASSERT() is assert(), which the
+        Release build compiles out (5.9 of the guide) -- so a NULL handle here
+        is not caught, it is dereferenced. */
+    segcp_uart_sem = xSemaphoreCreateCounting((unsigned portBASE_TYPE)0x7fffffff, (unsigned portBASE_TYPE)0);
 
 #if defined(MBEDTLS_PLATFORM_C) && defined(MBEDTLS_PLATFORM_MEMORY)
     mbedtls_platform_set_calloc_free(pvPortCalloc, vPortFree);
