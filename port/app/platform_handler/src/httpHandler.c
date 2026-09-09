@@ -360,9 +360,13 @@ static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
             continue;
         }
 
+        /*  "src" is which publisher owns the row -- a serial port's channel
+            number, or one of the DEVICE_SRC_* values for anything that is not
+            on a serial port. The page groups by it to give each port its own
+            view without holding a copy of the bank layout. */
         n = snprintf(chunk, sizeof(chunk),
-                     "%s{\"index\":%d,\"name\":\"%s\",\"values\":[",
-                     first ? "" : ",", d + 1, dev->name);
+                     "%s{\"index\":%d,\"name\":\"%s\",\"src\":%u,\"values\":[",
+                     first ? "" : ",", d + 1, dev->name, dev->source);
         for (uint8_t c = 0;
                 c < DEVICE_VALUE_COLS && n > 0 && n < (int)sizeof(chunk); c++) {
             n += snprintf(chunk + n, sizeof(chunk) - n, "%s%ld",
@@ -420,7 +424,7 @@ static void json_appendf(char *buf, size_t cap, int *n, const char *fmt, ...) {
     if (*n < 0) {
         return;                     /* an earlier call already failed */
     }
-    used = (size_t)*n;
+    used = (size_t) * n;
     room = (used < cap) ? cap - used : 0;
 
     va_start(ap, fmt);
