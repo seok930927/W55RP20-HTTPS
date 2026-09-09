@@ -57,6 +57,18 @@ extern Device g_devices[DEVICE_COUNT];
 /* Clear every device. Call once at boot before any device_assign(). */
 void device_init(void);
 
+/*  Reserve `count` consecutive rows for one protocol and return the first one,
+    or a negative code if the bank has no room (-2) or count is 0 (-1).
+
+    Call it once, when the protocol task starts, and keep the returned base;
+    rows given out this way never overlap with another protocol's. This is
+    what a protocol uses instead of a hand-picked base row -- two protocols
+    choosing bases by hand is how they end up writing over each other.
+
+    S/T/R does not reserve: its commands name a row outright, so it addresses
+    the whole bank by design. */
+int device_bank_reserve(uint8_t count);
+
 /*  Per-device ops — return code:
       0  = OK
      -1  = invalid arg (NULL pointer)
