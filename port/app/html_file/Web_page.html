@@ -105,6 +105,56 @@ th {
     width: 44px;
     color: #777;
 }
+/* contact-input blocks, laid out like the CN10/CN11 terminals */
+.din-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 4px;
+}
+.din-table {
+    width: auto;
+    min-width: 320px;
+    flex: 1 1 320px;
+}
+.din-table th, .din-table td {
+    font-size: 12px;
+    padding: 3px 6px;
+}
+.din-table .din-hd {
+    background: #e8e8e8;
+    font-weight: bold;
+}
+.din-table .din-io {
+    width: 52px;
+    border: none;
+    background: transparent;
+    color: #777;
+}
+.din-table .din-pin {
+    width: 62px;
+}
+.din-table .din-st {
+    width: 52px;
+}
+.din-table .din-alarm {
+    color: #c00000;
+    font-weight: bold;
+}
+/* a control parked at the right of a section heading */
+.section-title {
+    position: relative;
+}
+.title-ctl {
+    position: absolute;
+    right: 8px;
+    top: 3px;
+    font-weight: normal;
+    color: #444;
+}
+.title-ctl select {
+    font-size: 11px;
+    padding: 0 2px;
+}
 .footer {
     padding: 8px 12px 12px;
     text-align: center;
@@ -277,7 +327,8 @@ th {
     <nav class="topnav">
         <ul class="menu">
             <li>현재상태</li>
-            <li id="menu-sensor" class="sub active" onclick="showSensor('device')">온습도및입력</li>
+            <li id="menu-sensor" class="sub active" onclick="showSensor('device')">온습도및입력 1</li>
+            <li id="menu-sensor2" class="sub" onclick="showSensor('device2')">온습도및입력 2</li>
             <li id="menu-comm" class="sub" onclick="showSensor('comm')">통신데이타</li>
             <li id="menu-network" onclick="showTab('config')">네트워크환경</li>
             <li id="menu-config" onclick="showTab('setup')">환경설정</li>
@@ -298,11 +349,49 @@ th {
                     </table>
                     <div id="sensor-empty" style="text-align:center;padding:20px;color:#888;display:none">활성 항목이 없습니다</div>
                 </section>
-                <section class="section" id="din-section" style="display:none">
-                    <div class="section-title">센서 상태 ( 1 : 정상, 2 : 경보 )</div>
+                <section class="section" id="din-section">
+                    <div class="section-title">센서 상태 ( 1 : 정상, 2 : 경보 )
+                        <span class="title-ctl">새로고침
+                            <select id="poll-int">
+                                <option value="500">0.5초</option>
+                                <option value="1000">1초</option>
+                                <option value="2000">2초</option>
+                                <option value="3000">3초</option>
+                                <option value="5000">5초</option>
+                                <option value="10000">10초</option>
+                            </select>
+                        </span>
+                    </div>
+                    <div class="din-wrap" id="din-blocks"></div>
+                </section>
+                <div class="footer">에프엘시스템 &nbsp; E-mail: fms@flsystem.co.kr</div>
+            </div>
+
+            <!-- 온습도및입력 2 (시리얼 포트 2) -->
+            <div id="view-device2" style="display:none">
+                <div class="content-header">[ 온습도 센서 및 입출력데이터 — 시리얼 2 ]</div>
+                <section class="section">
+                    <div class="section-title">활성 디바이스</div>
                     <table class="sensor-table">
-                        <tbody id="din-rows"></tbody>
+                        <thead id="sensor-head2"></thead>
+                        <tbody id="sensor-rows2"></tbody>
                     </table>
+                    <div id="sensor-empty2" style="text-align:center;padding:20px;color:#888;display:none">활성 항목이 없습니다</div>
+                </section>
+                <section class="section" id="din-section2">
+                    <div class="section-title">센서 상태 ( 1 : 정상, 2 : 경보 )
+                        <span class="title-ctl">새로고침
+                            <select id="poll-int2">
+                                <option value="500">0.5초</option>
+                                <option value="1000">1초</option>
+                                <option value="2000">2초</option>
+                                <option value="3000">3초</option>
+                                <option value="5000">5초</option>
+                                <option value="10000">10초</option>
+                            </select>
+                        </span>
+                    </div>
+                    <div class="din-wrap" id="din-blocks2"></div>
                 </section>
                 <div class="footer">에프엘시스템 &nbsp; E-mail: fms@flsystem.co.kr</div>
             </div>
@@ -684,82 +773,138 @@ function fmtValue(v, col){
     if(col.unit) txt += ' ' + col.unit;
     return escHtml(txt);
 }
-/*  Contact inputs are named IN-1 .. IN-n by digitalInput.c, and their state
-    rides in the alarm column because the bank's columns are shared. */
-var DIN_PREFIX = 'IN-';
+/*  digitalInput.c names each row "IO<terminal> GP<pin>", so the page can draw
+    the connector without keeping a pin map of its own. State rides in the
+    alarm column, because the bank gives every device the same columns. */
+var DIN_NAME = /^IO(\d+) GP(\d+)$/;
 var DIN_STATE_COL = 2;
+var DIN_PER_BLOCK = 8;
+var DIN_BLOCK_NAME = ['CN10', 'CN11'];
 
-function updDin(list){
-    var sec = document.getElementById('din-section');
-    var rows = document.getElementById('din-rows');
-    if(!sec || !rows) return;
-
-    if(!list || list.length === 0){ sec.style.display='none'; rows.innerHTML=''; return; }
-    sec.style.display='';
-
-    /* Two per line, as the panel lays them out. */
-    var html='';
-    for(var i=0; i<list.length; i+=2){
-        html += '<tr>';
-        for(var k=0; k<2; k++){
-            var dev = list[i+k];
-            if(!dev){ html += '<th></th><td></td>'; continue; }
-            var v = (dev.values && dev.values[DIN_STATE_COL]!=null) ? dev.values[DIN_STATE_COL] : 0;
-            var txt = (v===2) ? '2' : (v===1 ? '1' : '-');
-            html += '<th>'+escHtml(dev.name)+' 상태</th><td>'+txt+'</td>';
-        }
-        html += '</tr>';
-    }
-    rows.innerHTML=html;
+/* "IO3 GP13" -> {io:3, gp:'GP13', dev:...}, or null if it is not an input. */
+function dinParse(dev){
+    var m = dev && dev.name ? DIN_NAME.exec(dev.name) : null;
+    if(!m) return null;
+    return { io: parseInt(m[1], 10), gp: 'GP' + m[2], dev: dev };
 }
 
-function upd(d){
-    var head  = document.getElementById('sensor-head');
-    var tbody = document.getElementById('sensor-rows');
-    var empty = document.getElementById('sensor-empty');
-    var cols  = d.columns || [];
+/*  Returns the cell body, not just the text: an alarm is worth seeing without
+    reading the number. */
+function dinState(e){
+    if(!e) return '';
+    var v = (e.dev.values && e.dev.values[DIN_STATE_COL]!=null) ? e.dev.values[DIN_STATE_COL] : 0;
+    if(v===2) return '<span class="din-alarm">2</span>';
+    return (v===1) ? '1' : '-';
+}
+
+/*  Drawn on every device page: the contact inputs belong to the unit, not to
+    either serial port, so whichever page you are on they are there. */
+var DIN_SUFFIX = ['', '2'];
+
+function updDin(list){
+    if(list){ list.sort(function(a,b){ return a.io - b.io; }); }
+    for(var s=0; s<DIN_SUFFIX.length; s++){
+        updDinBlock(DIN_SUFFIX[s], list);
+    }
+}
+
+function updDinBlock(sfx, list){
+    var sec  = document.getElementById('din-section'+sfx);
+    var wrap = document.getElementById('din-blocks'+sfx);
+    if(!sec || !wrap) return;
+
+    if(!list || list.length === 0){ sec.style.display='none'; wrap.innerHTML=''; return; }
+    sec.style.display='';
+
+    var html='';
+    for(var b=0; b*DIN_PER_BLOCK < list.length; b++){
+        var part = list.slice(b*DIN_PER_BLOCK, (b+1)*DIN_PER_BLOCK);
+        html += '<table class="din-table"><thead><tr>'
+             +  '<th class="din-io">'+(DIN_BLOCK_NAME[b] || '')+'</th>'
+             +  '<th class="din-hd din-pin">3.3V</th>'
+             +  '<th class="din-hd din-st">상태</th>'
+             +  '<th class="din-hd din-st">상태</th>'
+             +  '<th class="din-hd din-pin">GND</th>'
+             +  '<th class="din-io"></th>'
+             +  '</tr></thead><tbody>';
+        /*  Two terminals per line, as the connector is wired: the even one on
+            the 3.3V side, the odd one on the GND side. */
+        for(var i=0; i<part.length; i+=2){
+            var L = part[i], R = part[i+1];
+            html += '<tr>'
+                 +  '<td class="din-io">'+(L ? 'I/O_'+L.io : '')+'</td>'
+                 +  '<td class="din-pin">'+(L ? escHtml(L.gp) : '')+'</td>'
+                 +  '<td class="din-st">'+dinState(L)+'</td>'
+                 +  '<td class="din-st">'+dinState(R)+'</td>'
+                 +  '<td class="din-pin">'+(R ? escHtml(R.gp) : '')+'</td>'
+                 +  '<td class="din-io">'+(R ? 'I/O_'+R.io : '')+'</td>'
+                 +  '</tr>';
+        }
+        html += '</tbody></table>';
+    }
+    wrap.innerHTML=html;
+}
+
+/*  Which port a page shows. The device says where it came from in "src": a
+    serial protocol stamps its port channel, anything else a DEVICE_SRC_*
+    value, so the page never needs its own copy of the bank layout. */
+var VIEW_SRC = { 'sensor': 0, 'sensor2': 1 };
+
+/*  Draw one port's devices into its own table. */
+function updTable(suffix, cols, devs){
+    var head  = document.getElementById('sensor-head'+suffix);
+    var tbody = document.getElementById('sensor-rows'+suffix);
+    var empty = document.getElementById('sensor-empty'+suffix);
+    if(!head || !tbody || !empty) return;
 
     var hh = '<tr><th class="col-idx">Idx</th><th>이름</th>';
     for(var c=0; c<cols.length; c++){
         var u = cols[c].unit ? ' ('+escHtml(cols[c].unit)+')' : '';
         hh += '<th>'+escHtml(cols[c].name)+u+'</th>';
     }
-    hh += '</tr>';
-    head.innerHTML = hh;
+    head.innerHTML = hh + '</tr>';
 
-    /*  The bank gives every device the same columns, so the contact inputs
-        arrive carrying a temperature and a humidity they have no use for.
-        Split them off by name and show only their state. */
-    var meas=[], din=[];
-    var all = d.devices || [];
-    for(var i=0; i<all.length; i++){
-        (all[i].name && all[i].name.indexOf(DIN_PREFIX)===0 ? din : meas).push(all[i]);
-    }
+    if(devs.length === 0){ tbody.innerHTML=''; empty.style.display=''; return; }
+    empty.style.display='none';
 
-    if(meas.length === 0){
-        tbody.innerHTML='';
-        empty.style.display='';
-    }else{
-        empty.style.display='none';
-        var html='';
-        for(var i=0; i<meas.length; i++){
-            var dev = meas[i];
-            html += '<tr><td class="col-idx">'+dev.index+'</td><th>'+escHtml(dev.name)+'</th>';
-            for(var c=0; c<cols.length; c++){
-                var v = (dev.values && dev.values[c]!=null) ? dev.values[c] : 0;
-                html += '<td>'+fmtValue(v, cols[c])+'</td>';
-            }
-            html += '</tr>';
+    var html='';
+    for(var i=0; i<devs.length; i++){
+        var dev = devs[i];
+        html += '<tr><td class="col-idx">'+dev.index+'</td><th>'+escHtml(dev.name)+'</th>';
+        for(var c=0; c<cols.length; c++){
+            var v = (dev.values && dev.values[c]!=null) ? dev.values[c] : 0;
+            html += '<td>'+fmtValue(v, cols[c])+'</td>';
         }
-        tbody.innerHTML=html;
+        html += '</tr>';
     }
+    tbody.innerHTML=html;
+}
+
+function upd(d){
+    var cols = d.columns || [];
+    var all  = d.devices || [];
+
+    /*  Contact inputs get their own block whatever page you are on; the rest
+        go to the page for the port that produced them. */
+    var din=[], byPort={};
+    for(var i=0; i<all.length; i++){
+        var e = dinParse(all[i]);
+        if(e){ din.push(e); continue; }
+        var src = (all[i].src==null) ? 0 : all[i].src;
+        (byPort[src] = byPort[src] || []).push(all[i]);
+    }
+
+    updTable('',  cols, byPort[VIEW_SRC['sensor']]  || []);
+    updTable('2', cols, byPort[VIEW_SRC['sensor2']] || []);
     updDin(din);
+
     document.getElementById('comm_status').textContent=d.comm.status;
     document.getElementById('recv_cs').textContent=d.comm.recv_cs;
     document.getElementById('calc_cs').textContent=d.comm.calc_cs;
     document.getElementById('comm_check').textContent=d.comm.check;
     document.getElementById('comm_flag').textContent=d.comm.flag;
 }
+
 /* Session expiry → server replies with a redirect to /login. Detect it and
    move the whole page to the login screen (auto-logout). */
 function authRedirect(r){
@@ -772,8 +917,49 @@ function poll(){
         return r.json();
     }).then(function(d){ if(d) upd(d); }).catch(function(){});
 }
-setInterval(poll,3000);
-poll();
+/*  One second by default: a contact that just opened should not sit unseen
+    for three. The choice is per browser, not a device setting -- it costs the
+    device nothing and different people watching the same unit can differ. */
+var POLL_DEFAULT = 1000;
+var pollTimer = null;
+
+function pollRestart(ms){
+    if(pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(poll, ms);
+    poll();
+}
+
+(function(){
+    var ms = POLL_DEFAULT;
+    try{
+        var saved = parseInt(localStorage.getItem('pollInt'), 10);
+        if(saved > 0) ms = saved;
+    }catch(e){}
+
+    /*  One picker per page, all showing the same value: whichever one is
+        changed sets the interval and the others follow. */
+    var sels = [];
+    for(var i=0; i<DIN_SUFFIX.length; i++){
+        var el = document.getElementById('poll-int'+DIN_SUFFIX[i]);
+        if(el) sels.push(el);
+    }
+    function apply(v, from){
+        for(var i=0; i<sels.length; i++){
+            if(sels[i] !== from) sels[i].value = String(v);
+        }
+        try{ localStorage.setItem('pollInt', String(v)); }catch(e){}
+        pollRestart(v);
+    }
+    for(var i=0; i<sels.length; i++){
+        sels[i].value = String(ms);
+        if(sels[i].value !== String(ms)) ms = POLL_DEFAULT;
+        sels[i].onchange = function(){
+            apply(parseInt(this.value, 10) || POLL_DEFAULT, this);
+        };
+    }
+    for(var i=0; i<sels.length; i++){ sels[i].value = String(ms); }
+    pollRestart(ms);
+})();
 
 var _pendingTab=null;
 function showTab(tab){
@@ -788,6 +974,7 @@ function showTab(tab){
 }
 function _setMenu(active){
     document.getElementById('menu-sensor').className='sub'+(active==='device'?' active':'');
+    document.getElementById('menu-sensor2').className='sub'+(active==='device2'?' active':'');
     document.getElementById('menu-comm').className='sub'+(active==='comm'?' active':'');
     document.getElementById('menu-network').className=(active==='config')?'active':'';
     document.getElementById('menu-config').className=(active==='setup')?'active':'';
@@ -805,6 +992,7 @@ function showSensor(view){
     document.getElementById('tab-config').style.display='none';
     document.getElementById('tab-setup').style.display='none';
     document.getElementById('view-device').style.display=(view==='device')?'':'none';
+    document.getElementById('view-device2').style.display=(view==='device2')?'':'none';
     document.getElementById('view-comm').style.display=(view==='comm')?'':'none';
     _setMenu(view);
 }
