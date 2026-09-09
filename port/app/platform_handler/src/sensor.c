@@ -25,8 +25,37 @@ Device g_devices[DEVICE_COUNT] = {0};
     one after another and each reserves before its first exchange. */
 static uint8_t s_bank_next = 0;
 
+/*  What each publisher was given, so it can address its rows by index and
+    never has to hold a base of its own. One entry per source; a source that
+    reserves twice extends its block rather than getting a second entry. */
+#define DEVICE_SRC_SLOTS    8
+
+typedef struct {
+    uint8_t source;
+    uint8_t base;
+    uint8_t count;
+} BankBlock;
+
+static BankBlock s_res[DEVICE_SRC_SLOTS];
+static uint8_t s_res_cnt = 0;
+
+/* The reservation for `source`, or NULL if it never reserved. */
+static const BankBlock *bank_block(uint8_t source) {
+    for (uint8_t i = 0; i < s_res_cnt; i++) {
+        if (s_res[i].source == source) {
+            return &s_res[i];
+        }
+    }
+    return NULL;
+}
+
 void device_init(void) {
     memset(g_devices, 0, sizeof(g_devices));
+    for (int i = 0; i < DEVICE_COUNT; i++) {
+        g_devices[i].source = DEVICE_SRC_NONE;
+    }
+    memset(s_res, 0, sizeof(s_res));
+    s_res_cnt = 0;
     s_bank_next = 0;
 }
 
@@ -40,7 +69,7 @@ void device_init(void) {
 
     S/T/R does not reserve: its commands name a row outright ("S5=..." is
     device 5), so it addresses the whole bank by design. */
-int device_bank_reserve(uint8_t count) {
+int device_bank_reserve(uint8_t count, uint8_t source) {
     int base;
 
     if (count == 0) {
@@ -49,9 +78,62 @@ int device_bank_reserve(uint8_t count) {
     if ((int)s_bank_next + (int)count > DEVICE_COUNT) {
         return -2;                  /* bank full */
     }
+    if (source == DEVICE_SRC_NONE) {
+        return -1;                  /* the "never reserved" marker */
+    }
+    if (s_res_cnt >= DEVICE_SRC_SLOTS && bank_block(source) == NULL) {
+        return -3;                  /* no room to record it */
+    }
+
     base = (int)s_bank_next;
+    for (uint8_t i = 0; i < count; i++) {
+        g_devices[base + i].source = source;
+    }
     s_bank_next = (uint8_t)(s_bank_next + count);
+
+    /*  A second reserve by the same source extends its block, so its indices
+        stay one run from 0 rather than restarting. */
+    for (uint8_t i = 0; i < s_res_cnt; i++) {
+        if (s_res[i].source == source) {
+            s_res[i].count = (uint8_t)(s_res[i].count + count);
+            return base;
+        }
+    }
+    s_res[s_res_cnt].source = source;
+    s_res[s_res_cnt].base   = (uint8_t)base;
+    s_res[s_res_cnt].count  = count;
+    s_res_cnt++;
     return base;
+}
+
+int device_bank_row(uint8_t source, uint8_t idx) {
+    const BankBlock *b = bank_block(source);
+
+    if (b == NULL || idx >= b->count) {
+        return -2;
+    }
+    return (int)b->base + (int)idx;
+}
+
+int device_bank_assign(uint8_t source, uint8_t idx, const char *name) {
+    int row = device_bank_row(source, idx);
+
+    if (row < 0) {
+        return -2;
+    }
+    return device_assign((uint8_t)row, name);
+}
+
+int device_bank_setValue(uint8_t source, uint8_t idx, uint8_t col, int32_t value) {
+    int row = device_bank_row(source, idx);
+
+    if (row < 0) {
+        return -2;
+    }
+    if (col >= DEVICE_VALUE_COLS) {
+        return -3;
+    }
+    return device_setValue((uint8_t)row, col, value);
 }
 
 int device_assign(uint8_t dev, const char *name) {
@@ -61,7 +143,12 @@ int device_assign(uint8_t dev, const char *name) {
     if (name == NULL) {
         return -1;
     }
+    /*  The publisher is a property of the row, not of what is on it, so it
+        outlives the clear -- a protocol re-naming its device must not lose
+        which port the row belongs to. */
+    uint8_t src = g_devices[dev].source;
     memset(&g_devices[dev], 0, sizeof(g_devices[dev]));
+    g_devices[dev].source = src;
     g_devices[dev].enabled = 1;
     strncpy(g_devices[dev].name, name, DEVICE_NAME_MAX - 1);
     g_devices[dev].name[DEVICE_NAME_MAX - 1] = '\0';

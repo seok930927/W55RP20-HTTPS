@@ -26,8 +26,7 @@ int digitalInput_init(void) {
     return -1;
 }
 
-int digitalInput_poll(int base) {
-    (void)base;
+int digitalInput_poll(void) {
     return 0;
 }
 
@@ -51,41 +50,55 @@ void digitalInput_task(void *argument) {
 #define DIN_POLL_PERIOD     200     /* ms between sweeps                     */
 
 static const uint8_t s_pins[DIN_COUNT] = DIN_PINS;
+
+#ifdef DIN_PINS_IN_USE
 static const uint8_t s_in_use[] = DIN_PINS_IN_USE;
+#endif
 
 /*  Last published state per input, so a sweep only sends a trap for a line
     that actually moved. 0 means "nothing published yet". */
 static uint8_t s_last[DIN_COUNT];
 
-/*  True while some other function on this board still owns the pin. Those are
-    skipped rather than taken over, so the LEDs and the factory-reset button
-    keep working on a build where the connector is not wired up yet. */
+/*  True while some other function on this board still owns the pin, so that a
+    board which has not freed one of these lines yet keeps whatever is using
+    it. Without DIN_PINS_IN_USE nothing is held back and every terminal reads. */
 static int din_pin_taken(uint8_t pin) {
+#ifdef DIN_PINS_IN_USE
     for (unsigned i = 0; i < sizeof(s_in_use) / sizeof(s_in_use[0]); i++) {
         if (s_in_use[i] == pin) {
             return 1;
         }
     }
+#else
+    (void)pin;
+#endif
     return 0;
 }
 
 int digitalInput_init(void) {
-    int base = device_bank_reserve(DIN_COUNT);
+    int base = device_bank_reserve(DIN_COUNT, DEVICE_SRC_CONTACT);
     int skipped = 0;
 
     if (base < 0) {
         PRT_INFO("digitalInput: no room in the device bank\r\n");
         return base;
     }
+    /*  Terminal number is the index into the block from here on -- the base is
+        only used for the log line below. */
 
     for (int i = 0; i < DIN_COUNT; i++) {
         char name[DEVICE_NAME_MAX];
 
-        /*  The row is claimed either way, so the numbering stays put whether
+        /*  The name carries the terminal number and the pin behind it, so the
+            web page can lay the inputs out the way the connector is wired
+            without keeping its own copy of the pin map. Terminal numbering
+            starts at zero to match the board drawing.
+
+            The row is claimed either way, so the numbering stays put whether
             or not a given pin is available yet -- freeing a pin later must
             not shift every input after it. */
-        snprintf(name, sizeof(name), "IN-%d", i + 1);
-        device_assign((uint8_t)(base + i), name);
+        snprintf(name, sizeof(name), "IO%d GP%u", i, s_pins[i]);
+        device_bank_assign(DEVICE_SRC_CONTACT, (uint8_t)i, name);
         s_last[i] = 0;
 
         if (din_pin_taken(s_pins[i])) {
@@ -100,10 +113,10 @@ int digitalInput_init(void) {
     PRT_INFO("digitalInput: %d inputs at rows %d..%d (%d pin(s) still in use "
              "elsewhere, skipped)\r\n",
              DIN_COUNT, base, base + DIN_COUNT - 1, skipped);
-    return base;
+    return 0;
 }
 
-int digitalInput_poll(int base) {
+int digitalInput_poll(void) {
     int changed = 0;
 
     for (int i = 0; i < DIN_COUNT; i++) {
@@ -118,8 +131,9 @@ int digitalInput_poll(int base) {
             continue;
         }
         s_last[i] = state;
-        device_setValue((uint8_t)(base + i), DIN_VALUE_COL, (int32_t)state);
-        snmp_notify_device((uint8_t)(base + i));
+        device_bank_setValue(DEVICE_SRC_CONTACT, (uint8_t)i,
+                             DIN_VALUE_COL, (int32_t)state);
+        snmp_notify_device((uint8_t)device_bank_row(DEVICE_SRC_CONTACT, (uint8_t)i));
         changed++;
 
         PRT_INFO("digitalInput: IN-%d (GP%u) -> %s\r\n",
@@ -130,18 +144,15 @@ int digitalInput_poll(int base) {
 }
 
 void digitalInput_task(void *argument) {
-    int base;
-
     (void)argument;
 
-    base = digitalInput_init();
-    if (base < 0) {
+    if (digitalInput_init() < 0) {
         vTaskDelete(NULL);
         return;
     }
 
     while (1) {
-        digitalInput_poll(base);
+        digitalInput_poll();
         vTaskDelay(pdMS_TO_TICKS(DIN_POLL_PERIOD));
     }
 }

@@ -32,10 +32,10 @@ extern "C" {
     the protocol from somewhere other than protoTemplate_task(). */
 void protoTemplate_init(SerialPort *port);
 
-/*  One request/response exchange. `base` is the first device-bank row this
-    port owns, as returned by device_bank_reserve(). Returns 0 on success,
+/*  One request/response exchange. Publishes through the port's own bank
+    block, so nothing here handles a row number. Returns 0 on success,
     negative on error. */
-int protoTemplate_poll(SerialPort *port, uint8_t base);
+int protoTemplate_poll(SerialPort *port);
 
 /*  FreeRTOS task. Pass pvParameters = the SerialPort * to drive. */
 void protoTemplate_task(void *argument);

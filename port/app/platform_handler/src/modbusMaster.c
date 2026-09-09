@@ -111,17 +111,17 @@ int modbus_read_th(SerialPort *port, uint8_t slave, int16_t *temp, int16_t *hum)
 
 void modbusMaster_task(void *argument) {
     SerialPort *port = (SerialPort *)argument;
-    int base;
+    uint8_t src;
 
     if (port == NULL) {
         vTaskDelete(NULL);
         return;
     }
 
-    /*  One row per slave, asked for rather than chosen. Ports start in order,
-        so channel 0 still reserves first and keeps row 0. */
-    base = device_bank_reserve(MODBUS_SLAVE_LAST - MODBUS_SLAVE_FIRST + 1);
-    if (base < 0) {
+    /*  One row per slave, asked for rather than chosen, and addressed from
+        here by slave number -- the bank keeps track of where they landed. */
+    src = (uint8_t)port->channel;
+    if (device_bank_reserve(MODBUS_SLAVE_LAST - MODBUS_SLAVE_FIRST + 1, src) < 0) {
         PRT_INFO("modbusMaster: ch%d no room in the device bank\r\n", port->channel);
         vTaskDelete(NULL);
         return;
@@ -134,7 +134,7 @@ void modbusMaster_task(void *argument) {
     for (uint8_t s = MODBUS_SLAVE_FIRST; s <= MODBUS_SLAVE_LAST; s++) {
         char name[DEVICE_NAME_MAX];
         snprintf(name, sizeof(name), "TH-%u", s);
-        device_assign((uint8_t)(base + s - 1), name);
+        device_bank_assign(src, (uint8_t)(s - MODBUS_SLAVE_FIRST), name);
     }
 
     while (1) {
@@ -148,8 +148,9 @@ void modbusMaster_task(void *argument) {
             int16_t t = 0, h = 0;
             int r = modbus_read_th(port, s, &t, &h);
             if (r == 0) {
-                device_setValue((uint8_t)(base + s - 1), 0, t);   /* temperature */
-                device_setValue((uint8_t)(base + s - 1), 1, h);   /* humidity    */
+                uint8_t idx = (uint8_t)(s - MODBUS_SLAVE_FIRST);
+                device_bank_setValue(src, idx, 0, t);   /* temperature */
+                device_bank_setValue(src, idx, 1, h);   /* humidity    */
                 PRT_INFO("modbusMaster: slave %u  T=%d (%.1fC)  H=%d (%.1f%%)\r\n",
                          s, t, t / 10.0, h, h / 10.0);
             } else {

@@ -267,13 +267,22 @@ void start_task(void *argument) {
         } demo[4] = {
             { 250, 520 }, { 271, 508 }, { 278, 502 }, { 276, 512 },
         };
-        for (uint8_t d = 0; d < 4; d++) {
-            char name[DEVICE_NAME_MAX];
-            snprintf(name, sizeof(name), "TH-%d", d + 1);
-            device_assign(d, name);
-            device_setValue(d, 0, demo[d].temp);   /* col 0 — temperature */
-            device_setValue(d, 1, demo[d].hum);    /* col 1 — humidity    */
-            device_setValue(d, 2, 0);              /* col 2 — alarm       */
+        /*  Reserve the rows rather than writing 0..3 outright. Every other
+            publisher asks device_bank_reserve() for its block, and the
+            allocator only knows about rows it handed out -- rows written
+            behind its back are handed to whoever asks next, which is how
+            these four ended up overwritten by the contact inputs. */
+        uint8_t src = (uint8_t)g_serial_port[0].channel;
+
+        if (device_bank_reserve(4, src) >= 0) {
+            for (uint8_t d = 0; d < 4; d++) {
+                char name[DEVICE_NAME_MAX];
+                snprintf(name, sizeof(name), "TH-%d", d + 1);
+                device_bank_assign(src, d, name);
+                device_bank_setValue(src, d, 0, demo[d].temp);  /* temperature */
+                device_bank_setValue(src, d, 1, demo[d].hum);   /* humidity    */
+                device_bank_setValue(src, d, 2, 0);             /* alarm       */
+            }
         }
     }
 

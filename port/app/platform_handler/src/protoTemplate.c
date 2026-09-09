@@ -66,7 +66,7 @@ static int proto_recv(SerialPort *port, uint8_t *buf, int want, uint32_t timeout
     return got;
 }
 
-int protoTemplate_poll(SerialPort *port, uint8_t base) {
+int protoTemplate_poll(SerialPort *port) {
     uint8_t rsp[PROTO_RSP_MAX];
     int n;
 
@@ -92,11 +92,13 @@ int protoTemplate_poll(SerialPort *port, uint8_t base) {
         column names, units and decimal places come from g_value_columns[] in
         sensor.c, and the SNMP OIDs follow from it. Nothing else to wire up.
 
-            device_setValue(base, 0, value_from(rsp));
-            snmp_notify_device(base);   // only if a trap should go out
+            uint8_t src = (uint8_t)port->channel;
+            device_bank_setValue(src, 0, 0, value_from(rsp));
+            snmp_notify_device(device_bank_row(src, 0));  // only for a trap
 
-        `base` is the first row reserved for this port; use base + 1, base + 2
-        and so on if you publish more than one device.
+        The 0 after src is which of this port's own devices you are writing,
+        counting from zero -- not a bank row. Use 1, 2 ... for the rest if you
+        reserved more than one.
         ------------------------------------------------------------------ */
     (void)rsp;
 
@@ -106,17 +108,17 @@ int protoTemplate_poll(SerialPort *port, uint8_t base) {
 void protoTemplate_task(void *argument) {
     SerialPort *port = (SerialPort *)argument;
     char name[DEVICE_NAME_MAX];
-    int base;
+    uint8_t src;
 
     if (port == NULL) {
         vTaskDelete(NULL);
         return;
     }
 
-    /*  Ask for rows rather than choosing them. Whatever else is running gets
-        its own, so nothing here has to know what the others took. */
-    base = device_bank_reserve(PROTO_DEVICE_CNT);
-    if (base < 0) {
+    /*  Ask for rows rather than choosing them, then address them by index
+        from 0. Whatever else is running gets its own block. */
+    src = (uint8_t)port->channel;
+    if (device_bank_reserve(PROTO_DEVICE_CNT, src) < 0) {
         PRT_INFO("protoTemplate: ch%d no room in the device bank\r\n", port->channel);
         vTaskDelete(NULL);
         return;
@@ -127,7 +129,7 @@ void protoTemplate_task(void *argument) {
     /*  Claim the row now so the device shows up in the web table before the
         first successful exchange, rather than appearing out of nowhere. */
     snprintf(name, sizeof(name), "CUSTOM-%d", port->channel);
-    device_assign((uint8_t)base, name);
+    device_bank_assign(src, 0, name);
 
     while (1) {
         /*  While the operator is in command mode that port belongs to the
@@ -137,7 +139,7 @@ void protoTemplate_task(void *argument) {
             continue;
         }
 
-        if (protoTemplate_poll(port, (uint8_t)base) != 0) {
+        if (protoTemplate_poll(port) != 0) {
             PRT_INFO("protoTemplate: ch%d no response\r\n", port->channel);
         }
 

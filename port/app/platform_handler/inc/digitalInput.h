@@ -30,13 +30,13 @@ extern "C" {
     registry, and no place in the web Mode dropdown. It is just a task.  */
 
 /*  Set the input pins up and reserve the bank rows. Called by the task; call
-    it yourself only if you drive the polling from somewhere else. Returns the
-    first reserved row, or negative if the bank had no room. */
+    it yourself only if you drive the polling from somewhere else. Returns 0,
+    or negative if the bank had no room. */
 int digitalInput_init(void);
 
-/*  Read every input once and publish what changed. `base` is the row returned
-    by digitalInput_init(). Returns how many inputs changed state. */
-int digitalInput_poll(int base);
+/*  Read every input once and publish what changed. Returns how many inputs
+    changed state. */
+int digitalInput_poll(void);
 
 /* FreeRTOS task. Takes no parameter. */
 void digitalInput_task(void *argument);
