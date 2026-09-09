@@ -25,7 +25,16 @@ typedef enum {RESET = 0, SET = !RESET} FlagStatus, ITStatus;
 #if ((DEVICE_BOARD_NAME == WIZ5XXSR_RP) || DEVICE_BOARD_NAME == W55RP20_S2E || DEVICE_BOARD_NAME == W232N || DEVICE_BOARD_NAME == IP20 || DEVICE_BOARD_NAME == PLATYPUS_S2E) // Chip product
 //#define __USE_DHCP_INFINITE_LOOP__          // When this option is enabled, if DHCP IP allocation failed, process_dhcp() function will try to DHCP steps again.
 //#define __USE_DNS_INFINITE_LOOP__           // When this option is enabled, if DNS query failed, process_dns() function will try to DNS steps again.
-#define __USE_HW_FACTORY_RESET__            // Use Factory reset pin
+/*  Off on this board: the pin it watches, GP18, is CN11 terminal 1, so a field
+    contact held closed there would read as the reset button being held.
+
+    It could not fire as it stood -- the flag it waits on is only ever set from
+    a GPIO interrupt callback that nothing installs -- but the pin is wired to
+    a terminal block now, and leaving the watcher in place means whoever
+    connects that callback later gets a device that factory-resets itself when
+    a sensor reports normal. There is no reset button on this board; SW4 and
+    SW5 drive RP_BOOT and RSTn directly. */
+//#define __USE_HW_FACTORY_RESET__          // Use Factory reset pin
 #define __USE_SAFE_SAVE__                   // When this option is enabled, data verify is additionally performed in the flash save of config-data.
 #define __USE_WATCHDOG__                  // WDT timeout 30 Second
 #define __USE_S2E_OVER_TLS__                // Use S2E TCP client over SSL/TLS mode
@@ -140,21 +149,27 @@ typedef enum {RESET = 0, SET = !RESET} FlagStatus, ITStatus;
     They reach the web page and SNMP through the device bank, so nothing
     downstream needs to know they came from GPIO rather than a serial bus.
 
-    DIN_PINS is the connector as the board drawing has it. On this build most
-    of those pins are still claimed by something else -- the two status LEDs,
-    the factory-reset button, the boot straps, DTR/DSR and the SPI-slave
-    lines -- so DIN_PINS_IN_USE lists them and digitalInput skips those,
-    leaving the functions that own them working. Delete a pin from that list
-    when the board stops needing it there, and that input starts reading; the
-    goal is for the list to end up empty.  */
+    DIN_PINS is J2 and J3 on SCH-JSiCT-FMS-V100, in terminal order. Several
+    of the names further down this file still claim some of these pins for
+    status LEDs, DTR/DSR, interface straps and an SPI slave port; those come
+    from the W55RP20-S2E reference board and none of them exist here. This
+    board drives its Ethernet LEDs from the chip's own LINKLED/ACTLED pins and
+    has no reset or strap buttons -- SW4 and SW5 drive RP_BOOT and RSTn.
+    Nothing re-configures a pin direction after boot, so the leftover code
+    writes to pins that are inputs by then and has no effect.
+
+    All sixteen are read. GP29 is also SW1 position 4, which shorts that line
+    to ground when it is closed, so I/O_13 reads as a closed contact whenever
+    that switch is on whatever the field wiring says -- leave it off to use
+    the terminal.
+
+    Define DIN_PINS_IN_USE with a list of pins to have digitalInput leave them
+    alone, for a board that still needs one of these lines for something else. */
 #define DIN_COUNT              16
 #define DIN_PINS   { 10, 11, 12, 13, 14, 15, 16,  2, \
                      18, 19, 26, 27, 28, 29,  8,  9 }
 
-/*  10,11 status LEDs   12,13 interface straps   14,15 boot straps
-    2,26  SPI slave     18    factory reset      19    blink LED
-    8,9   DTR/DSR                                                         */
-#define DIN_PINS_IN_USE  { 10, 11, 12, 13, 14, 15, 2, 18, 19, 26, 8, 9 }
+//#define DIN_PINS_IN_USE  { 29 }
 
 #ifdef UART_PIO_DEBUG
 #define DEBUG_UART_TX_PIN      0
