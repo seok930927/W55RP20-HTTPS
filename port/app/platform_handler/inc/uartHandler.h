@@ -157,6 +157,29 @@ int32_t serial_port_getc(SerialPort *port);
 void serial_port_tx_enable(SerialPort *port);
 void serial_port_tx_disable(SerialPort *port);
 
+/*  Throw away whatever is already waiting on the port.
+
+    Worth doing before a request so a reply left over from a timed-out exchange
+    is not read as the answer to the next one. */
+void serial_port_flush_rx(SerialPort *port);
+
+/*  Turn hardware RTS/CTS off for this port whatever its stored setting says.
+
+    A half-duplex bus has no use for RTS/CTS, and on an RS-485 port the RTS pin
+    is the direction line, so leaving hardware flow control on would fight the
+    driver for it. A protocol that does not speak RTS/CTS calls this once after
+    its port is set up. */
+void serial_port_hw_flow_disable(SerialPort *port);
+
+/*  True while the serial command mode holds this port.
+
+    A protocol polls in a loop; when the operator escapes into command mode the
+    port belongs to the config handler until they leave, and polling through it
+    would fight for the same FIFO. Ask this at the top of the loop and wait
+    instead of transmitting. Only one port can be in command mode, so this
+    answers false on the others -- the caller does not have to know which. */
+uint8_t serial_port_in_command_mode(SerialPort *port);
+
 extern uint32_t baud_table[];
 extern uint8_t word_len_table[];
 extern uint8_t stop_bit_table[];

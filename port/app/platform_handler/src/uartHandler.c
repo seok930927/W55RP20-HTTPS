@@ -495,6 +495,25 @@ void serial_port_tx_disable(SerialPort *port) {
     }
     //UART_IF_RS422: None
 }
+
+void serial_port_flush_rx(SerialPort *port) {
+    /*  Through serial_port_getc() rather than uart_getc(), so bytes discarded
+        here are still seen by the command-mode escape watcher. */
+    while (uart_is_readable(port->uart)) {
+        (void)serial_port_getc(port);
+    }
+}
+
+void serial_port_hw_flow_disable(SerialPort *port) {
+    uart_set_hw_flow(port->uart, false, false);
+}
+
+uint8_t serial_port_in_command_mode(SerialPort *port) {
+    /*  Command mode is watched on one port only -- the escape trigger state is
+        a single device-wide instance -- so the channel test belongs here
+        rather than in every protocol that has to stand down. */
+    return ((port->channel == SEG_DATA0_CH) && (opmode == DEVICE_AT_MODE)) ? 1u : 0u;
+}
 #endif
 
 #ifdef __USE_GPIO_HARDWARE_FLOWCONTROL__

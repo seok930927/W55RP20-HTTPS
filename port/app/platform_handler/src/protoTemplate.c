@@ -13,16 +13,14 @@
 #include "task.h"
 
 #include "protoTemplate.h"
-#include "seg.h"                /* SEG_DATA0_CH, opmode, DEVICE_AT_MODE      */
-#include "sensor.h"             /* device_assign, device_setValue            */
+#include "sensor.h"             /* device_bank_reserve, device_setValue      */
 #include "snmpHandler.h"        /* snmp_notify_device                        */
 #include "WIZ5XXSR-RP_Debug.h"  /* PRT_INFO                                  */
 
-/*  Which device-bank row this port publishes into. Two ports running this at
-    once must not share rows, so they are kept apart the way modbusMaster.c
-    keeps its own apart. */
-#define PROTO_BANK_BASE_CH0   16
-#define PROTO_BANK_BASE_CH1   48
+/*  How many device-bank rows this protocol publishes into. The rows are asked
+    for at startup rather than written down here, so two protocols can never
+    pick overlapping ranges. */
+#define PROTO_DEVICE_CNT        1
 
 #define PROTO_RSP_TIMEOUT     200   /* ms to wait for a full response frame  */
 #define PROTO_POLL_PERIOD    1000   /* ms between exchanges                  */
@@ -34,8 +32,10 @@ void protoTemplate_init(SerialPort *port) {
         afterwards through port->opt if you need them. */
     serial_port_setup(port);
 
-    /*  Say so if your device uses RTS/CTS; most half-duplex buses do not. */
-    uart_set_hw_flow(port->uart, false, false);
+    /*  Drop this line if your device really does use RTS/CTS; most
+        half-duplex buses do not, and on RS-485 that pin is the direction
+        line. */
+    serial_port_hw_flow_disable(port);
 
     PRT_INFO("protoTemplate: ready (ch%d, DE=GPIO%u)\r\n",
              port->channel, port->de_pin);
@@ -66,14 +66,12 @@ static int proto_recv(SerialPort *port, uint8_t *buf, int want, uint32_t timeout
     return got;
 }
 
-int protoTemplate_poll(SerialPort *port) {
+int protoTemplate_poll(SerialPort *port, uint8_t base) {
     uint8_t rsp[PROTO_RSP_MAX];
     int n;
 
     /*  Drop anything left over from a previous exchange. */
-    while (uart_is_readable(port->uart)) {
-        (void)serial_port_getc(port);
-    }
+    serial_port_flush_rx(port);
 
     /*  ── TODO 1: send your request ──────────────────────────────────────
         serial_port_puts() holds the RS-485 direction line for the whole frame
@@ -94,10 +92,11 @@ int protoTemplate_poll(SerialPort *port) {
         column names, units and decimal places come from g_value_columns[] in
         sensor.c, and the SNMP OIDs follow from it. Nothing else to wire up.
 
-            uint8_t row = (port->channel == SEG_DATA0_CH)
-                          ? PROTO_BANK_BASE_CH0 : PROTO_BANK_BASE_CH1;
-            device_setValue(row, 0, value_from(rsp));
-            snmp_notify_device(row);    // only if a trap should go out
+            device_setValue(base, 0, value_from(rsp));
+            snmp_notify_device(base);   // only if a trap should go out
+
+        `base` is the first row reserved for this port; use base + 1, base + 2
+        and so on if you publish more than one device.
         ------------------------------------------------------------------ */
     (void)rsp;
 
@@ -106,32 +105,40 @@ int protoTemplate_poll(SerialPort *port) {
 
 void protoTemplate_task(void *argument) {
     SerialPort *port = (SerialPort *)argument;
-    uint8_t base;
     char name[DEVICE_NAME_MAX];
+    int base;
 
     if (port == NULL) {
         vTaskDelete(NULL);
         return;
     }
-    base = (port->channel == SEG_DATA0_CH) ? PROTO_BANK_BASE_CH0
-                                           : PROTO_BANK_BASE_CH1;
+
+    /*  Ask for rows rather than choosing them. Whatever else is running gets
+        its own, so nothing here has to know what the others took. */
+    base = device_bank_reserve(PROTO_DEVICE_CNT);
+    if (base < 0) {
+        PRT_INFO("protoTemplate: ch%d no room in the device bank
+", port->channel);
+        vTaskDelete(NULL);
+        return;
+    }
 
     protoTemplate_init(port);
 
     /*  Claim the row now so the device shows up in the web table before the
         first successful exchange, rather than appearing out of nowhere. */
     snprintf(name, sizeof(name), "CUSTOM-%d", port->channel);
-    device_assign(base, name);
+    device_assign((uint8_t)base, name);
 
     while (1) {
-        /*  Command mode owns the config port while it lasts. Polling through
-            it would fight segcp for the same FIFO. */
-        if ((port->channel == SEG_DATA0_CH) && (opmode == DEVICE_AT_MODE)) {
+        /*  While the operator is in command mode that port belongs to the
+            config handler; polling through it would fight for the same FIFO. */
+        if (serial_port_in_command_mode(port)) {
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
 
-        if (protoTemplate_poll(port) != 0) {
+        if (protoTemplate_poll(port, (uint8_t)base) != 0) {
             PRT_INFO("protoTemplate: ch%d no response\r\n", port->channel);
         }
 

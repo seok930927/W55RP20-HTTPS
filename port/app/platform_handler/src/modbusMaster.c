@@ -9,7 +9,6 @@
 #include "task.h"
 
 #include "modbusMaster.h"
-#include "seg.h"           /* SEG_DATA0_CH / SEG_DATA1_CH */
 #include "sensor.h"             /* device_assign, device_setValue            */
 #include "ConfigData.h"         /* get_DevConfig_pointer, serial_option_485   */
 #include "uartHandler.h"        /* baud_table, word_len/parity/stop enums     */
@@ -29,12 +28,6 @@ extern uint32_t baud_table[];
 #define MODBUS_SLAVE_FIRST   1
 #define MODBUS_SLAVE_LAST    4
 
-/*  Device-bank row each port starts at. Both ports polling at once would
-    otherwise write the same rows; channel 0 keeps row 0 so existing SNMP index
-    mappings do not move. */
-#define MODBUS_BANK_BASE_CH0     0
-#define MODBUS_BANK_BASE_CH1     32
-
 #define MODBUS_RSP_LEN       9      /* slave,func,bytecount,temp(2),hum(2),crc(2) */
 #define MODBUS_RSP_TIMEOUT   150    /* ms to wait for a full response frame      */
 #define MODBUS_POLL_PERIOD   1000   /* ms between full poll cycles               */
@@ -46,7 +39,7 @@ void modbusMaster_init(SerialPort *port) {
     struct __serial_option *opt;
 
     serial_port_setup(port);
-    uart_set_hw_flow(port->uart, false, false);   /* Modbus RTU never uses RTS/CTS */
+    serial_port_hw_flow_disable(port);            /* Modbus RTU never uses RTS/CTS */
     opt = port->opt;
 
     PRT_INFO("modbusMaster: master ready (ch%d, %lu-%u-%s-%u)\r\n",
@@ -55,13 +48,6 @@ void modbusMaster_init(SerialPort *port) {
              (opt->data_bits == word_len7) ? 7 : 8,
              parity_table[opt->parity <= parity_mark ? opt->parity : parity_none],
              (opt->stop_bits == stop_bit2) ? 2 : 1);
-}
-
-/* Drain the RX FIFO of any stale bytes before a transaction. */
-static void mb_flush_rx(SerialPort *port) {
-    while (uart_is_readable(port->uart)) {
-        (void)serial_port_getc(port);
-    }
 }
 
 /* Read up to `want` bytes within `timeout_ms`. Returns the number received. */
@@ -85,29 +71,19 @@ static int mb_recv(SerialPort *port, uint8_t *buf, int want, uint32_t timeout_ms
 }
 
 int modbus_read_th(SerialPort *port, uint8_t slave, int16_t *temp, int16_t *hum) {
-    uart_inst_t *uart = port->uart;
     /* Request: read 2 input registers (Func 04) from address 0x0000. */
     uint8_t req[8] = { slave, 0x04, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00 };
     uint16_t crc = usMBCRC16(req, 6);
     req[6] = (uint8_t)(crc & 0xFF);   /* Modbus CRC: low byte first */
     req[7] = (uint8_t)(crc >> 8);
 
-    mb_flush_rx(port);
+    serial_port_flush_rx(port);
 
-    /*  Drive the RTS/485SEL line around the frame when the port runs in RS-485
-        mode. Both helpers are no-ops for TTL/RS-232 and RS-422, and
-        serial_port_tx_disable() waits for the shift register to drain before it
-        releases the bus, so the slave never sees a truncated frame. */
-#ifdef __USE_UART_485_422__
-    serial_port_tx_enable(port);
-#endif
-    for (int i = 0; i < 8; i++) {
-        uart_putc_raw(uart, req[i]);
-    }
-    uart_tx_wait_blocking(uart);
-#ifdef __USE_UART_485_422__
-    serial_port_tx_disable(port);
-#endif
+    /*  Sends the frame and drives the RS-485 direction line around it, waiting
+        for the shift register to drain before releasing the bus, so the slave
+        never sees a truncated frame. No-op direction handling on TTL/RS-232
+        and RS-422. */
+    serial_port_puts(port, req, sizeof(req));
 
     uint8_t rsp[MODBUS_RSP_LEN];
     int n = mb_recv(port, rsp, MODBUS_RSP_LEN, MODBUS_RSP_TIMEOUT);
@@ -134,10 +110,23 @@ int modbus_read_th(SerialPort *port, uint8_t slave, int16_t *temp, int16_t *hum)
 }
 
 void modbusMaster_task(void *argument) {
-    SerialPort *port = (argument != NULL) ? (SerialPort *)argument
-                                          : &g_serial_port[SEG_DATA0_CH];
-    uint8_t base = (port->channel == SEG_DATA0_CH)
-                   ? MODBUS_BANK_BASE_CH0 : MODBUS_BANK_BASE_CH1;
+    SerialPort *port = (SerialPort *)argument;
+    int base;
+
+    if (port == NULL) {
+        vTaskDelete(NULL);
+        return;
+    }
+
+    /*  One row per slave, asked for rather than chosen. Ports start in order,
+        so channel 0 still reserves first and keeps row 0. */
+    base = device_bank_reserve(MODBUS_SLAVE_LAST - MODBUS_SLAVE_FIRST + 1);
+    if (base < 0) {
+        PRT_INFO("modbusMaster: ch%d no room in the device bank
+", port->channel);
+        vTaskDelete(NULL);
+        return;
+    }
 
     modbusMaster_init(port);
 
@@ -150,9 +139,9 @@ void modbusMaster_task(void *argument) {
     }
 
     while (1) {
-        /*  Command mode owns the config port while it lasts; polling would
-            fight segcp for the same FIFO. */
-        if ((port->channel == SEG_DATA0_CH) && (opmode == DEVICE_AT_MODE)) {
+        /*  While the operator is in command mode that port belongs to the
+            config handler; polling would fight for the same FIFO. */
+        if (serial_port_in_command_mode(port)) {
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }

@@ -124,7 +124,7 @@ static void sensorUart_claim(SerialPort *port) {
         return;
     }
 
-    uart_set_hw_flow(port->uart, false, false);   /* S/T/R never uses RTS/CTS */
+    serial_port_hw_flow_disable(port);            /* S/T/R never uses RTS/CTS */
 
     irq_set_exclusive_handler(port->irq,
                               (port->channel == SEG_DATA0_CH)
