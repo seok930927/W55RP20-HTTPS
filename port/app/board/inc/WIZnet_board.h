@@ -129,10 +129,32 @@ typedef enum {RESET = 0, SET = !RESET} FlagStatus, ITStatus;
 #define WIZCHIP_PIN_RST        25
 #define WIZCHIP_PIN_IRQ        24
 
-#define BOOT_MODE_PIN          15    //When this pin is Low during a device reset, it enters AT Command Mode  
+#define BOOT_MODE_PIN          15    //When this pin is Low during a device reset, it enters AT Command Mode
 #define FAC_RSTn_PIN           18    //Holding Low for more than 5 seconds triggers a factory reset
 #define HW_TRIG_PIN            14    //When this pin is Low during a device reset, it enters AT Command Mode
 #define DATA0_UART_PORTNUM          (1)
+
+/*  ── CN10 / CN11 digital inputs ─────────────────────────────────────────
+    Sixteen contact inputs, one per terminal, read as the health of whatever
+    sensor is wired to it: closed (low) = normal, open (high) = alarm.
+    They reach the web page and SNMP through the device bank, so nothing
+    downstream needs to know they came from GPIO rather than a serial bus.
+
+    DIN_PINS is the connector as the board drawing has it. On this build most
+    of those pins are still claimed by something else -- the two status LEDs,
+    the factory-reset button, the boot straps, DTR/DSR and the SPI-slave
+    lines -- so DIN_PINS_IN_USE lists them and digitalInput skips those,
+    leaving the functions that own them working. Delete a pin from that list
+    when the board stops needing it there, and that input starts reading; the
+    goal is for the list to end up empty.  */
+#define DIN_COUNT              16
+#define DIN_PINS   { 10, 11, 12, 13, 14, 15, 16,  2, \
+                     18, 19, 26, 27, 28, 29,  8,  9 }
+
+/*  10,11 status LEDs   12,13 interface straps   14,15 boot straps
+    2,26  SPI slave     18    factory reset      19    blink LED
+    8,9   DTR/DSR                                                         */
+#define DIN_PINS_IN_USE  { 10, 11, 12, 13, 14, 15, 2, 18, 19, 26, 8, 9 }
 
 #ifdef UART_PIO_DEBUG
 #define DEBUG_UART_TX_PIN      0

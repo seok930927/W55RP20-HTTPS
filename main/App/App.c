@@ -29,6 +29,7 @@
 #include "sensor.h"
 #include "sensorUart.h"
 #include "serialProtocol.h"   /* protocol registry: task table */
+#include "digitalInput.h"     /* CN10/CN11 contact inputs      */
 
 #include "w5x00_spi.h"
 
@@ -59,6 +60,9 @@
 
 #define SENSOR_UART_TASK_STACK_SIZE 1024
 #define SENSOR_UART_TASK_PRIORITY 9
+
+#define DIGITAL_INPUT_TASK_STACK_SIZE 512
+#define DIGITAL_INPUT_TASK_PRIORITY 8
 
 
 
@@ -306,6 +310,10 @@ void start_task(void *argument) {
     for (uint8_t p = 0; p < SERIAL_PORT_CNT; p++) {
         serial_protocol_start(&g_serial_port[p]);
     }
+    /*  After the serial protocols on purpose: device_bank_reserve() hands out
+        rows in the order tasks ask for them, so the polling protocols keep the
+        low rows they had and the contact inputs follow on behind. */
+    xTaskCreate(digitalInput_task, "Digital_Input_Task", DIGITAL_INPUT_TASK_STACK_SIZE, NULL, DIGITAL_INPUT_TASK_PRIORITY, NULL);
     // xTaskCreate(heap_monitor_task, "Heap_Monitor_Task", HEAP_MONITOR_TASK_STACK_SIZE, NULL, HEAP_MONITOR_TASK_PRIORITY, NULL);
 #ifdef __USE_WATCHDOG__
     watchdog_enable(8388, 0);

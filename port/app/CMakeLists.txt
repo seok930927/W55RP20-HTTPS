@@ -203,6 +203,7 @@ target_sources(APP_PLATFORM_FILES PUBLIC
         ${APP_PORT_DIR}/platform_handler/src/sensorUart.c
         ${APP_PORT_DIR}/platform_handler/src/modbusMaster.c
         ${APP_PORT_DIR}/platform_handler/src/protoTemplate.c
+        ${APP_PORT_DIR}/platform_handler/src/digitalInput.c
         ${APP_PORT_DIR}/platform_handler/src/serialProtocol.c
         ${APP_PORT_DIR}/platform_handler/src/spiHandler.c
         ${APP_PORT_DIR}/platform_handler/src/storageHandler.c

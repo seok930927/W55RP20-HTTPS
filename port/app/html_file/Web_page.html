@@ -298,6 +298,12 @@ th {
                     </table>
                     <div id="sensor-empty" style="text-align:center;padding:20px;color:#888;display:none">활성 항목이 없습니다</div>
                 </section>
+                <section class="section" id="din-section" style="display:none">
+                    <div class="section-title">센서 상태 ( 1 : 정상, 2 : 경보 )</div>
+                    <table class="sensor-table">
+                        <tbody id="din-rows"></tbody>
+                    </table>
+                </section>
                 <div class="footer">에프엘시스템 &nbsp; E-mail: fms@flsystem.co.kr</div>
             </div>
 
@@ -678,6 +684,35 @@ function fmtValue(v, col){
     if(col.unit) txt += ' ' + col.unit;
     return escHtml(txt);
 }
+/*  Contact inputs are named IN-1 .. IN-n by digitalInput.c, and their state
+    rides in the alarm column because the bank's columns are shared. */
+var DIN_PREFIX = 'IN-';
+var DIN_STATE_COL = 2;
+
+function updDin(list){
+    var sec = document.getElementById('din-section');
+    var rows = document.getElementById('din-rows');
+    if(!sec || !rows) return;
+
+    if(!list || list.length === 0){ sec.style.display='none'; rows.innerHTML=''; return; }
+    sec.style.display='';
+
+    /* Two per line, as the panel lays them out. */
+    var html='';
+    for(var i=0; i<list.length; i+=2){
+        html += '<tr>';
+        for(var k=0; k<2; k++){
+            var dev = list[i+k];
+            if(!dev){ html += '<th></th><td></td>'; continue; }
+            var v = (dev.values && dev.values[DIN_STATE_COL]!=null) ? dev.values[DIN_STATE_COL] : 0;
+            var txt = (v===2) ? '2' : (v===1 ? '1' : '-');
+            html += '<th>'+escHtml(dev.name)+' 상태</th><td>'+txt+'</td>';
+        }
+        html += '</tr>';
+    }
+    rows.innerHTML=html;
+}
+
 function upd(d){
     var head  = document.getElementById('sensor-head');
     var tbody = document.getElementById('sensor-rows');
@@ -692,14 +727,23 @@ function upd(d){
     hh += '</tr>';
     head.innerHTML = hh;
 
-    if(!d.devices || d.devices.length === 0){
+    /*  The bank gives every device the same columns, so the contact inputs
+        arrive carrying a temperature and a humidity they have no use for.
+        Split them off by name and show only their state. */
+    var meas=[], din=[];
+    var all = d.devices || [];
+    for(var i=0; i<all.length; i++){
+        (all[i].name && all[i].name.indexOf(DIN_PREFIX)===0 ? din : meas).push(all[i]);
+    }
+
+    if(meas.length === 0){
         tbody.innerHTML='';
         empty.style.display='';
     }else{
         empty.style.display='none';
         var html='';
-        for(var i=0; i<d.devices.length; i++){
-            var dev = d.devices[i];
+        for(var i=0; i<meas.length; i++){
+            var dev = meas[i];
             html += '<tr><td class="col-idx">'+dev.index+'</td><th>'+escHtml(dev.name)+'</th>';
             for(var c=0; c<cols.length; c++){
                 var v = (dev.values && dev.values[c]!=null) ? dev.values[c] : 0;
@@ -709,6 +753,7 @@ function upd(d){
         }
         tbody.innerHTML=html;
     }
+    updDin(din);
     document.getElementById('comm_status').textContent=d.comm.status;
     document.getElementById('recv_cs').textContent=d.comm.recv_cs;
     document.getElementById('calc_cs').textContent=d.comm.calc_cs;
