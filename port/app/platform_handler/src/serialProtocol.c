@@ -3,22 +3,30 @@
 #include "serialProtocol.h"
 #include "seg.h"                /* SEG_DATA0_CH                              */
 #include "modbusMaster.h"       /* modbusMaster_task                         */
-#include "protoTemplate.h"      /* protoTemplate_task                        */
 #include "WIZ5XXSR-RP_Debug.h"  /* PRT_INFO                                  */
 
 /*  One row per protocol. Order does not matter; the id is what binds a row to
     the value stored in serial_option.protocol.
 
+    This table is the whole dropdown: what is here is what an operator can pick,
+    and nothing else survives the config POST. So it lists what this firmware
+    actually implements, and nothing else.
+
+    A row is not a promise to build something -- it is a report that something
+    is built. modbus_ascii and sec_ups have ids in enum protocol but no rows,
+    because neither has a handler; listing them would let an operator select a
+    protocol that silently does not run. protocol_custom has no row for the
+    same kind of reason: it means something to whoever extends the firmware,
+    not to whoever operates the device.
+
     A NULL task means sensorUart keeps the port and parses S/T/R on it, which
-    is what protocol_none is. modbus_ascii and sec_ups are listed so they
-    appear in the dropdown and survive validation, but neither has a handler
-    yet, so a port set to one of them still lands in sensorUart.  */
+    is what protocol_none is -- S/T/R is implemented, so its row stays.
+
+    Adding a protocol: write it, register the .c, add a row here under its own
+    name. See APP_DEV_GUIDE.md chapter 4.4.  */
 const SerialProtocol g_serial_protocol[] = {
     { protocol_none,   "Free",         NULL,               0,    0 },
     { modbus_rtu,      "Modbus RTU",   modbusMaster_task,  1024, 9 },
-    { modbus_ascii,    "Modbus ASCII", NULL,               0,    0 },
-    { sec_ups,         "SEC UPS",      NULL,               0,    0 },
-    { protocol_custom, "Custom",       protoTemplate_task, 1024, 9 },
 };
 
 const uint8_t g_serial_protocol_cnt =
