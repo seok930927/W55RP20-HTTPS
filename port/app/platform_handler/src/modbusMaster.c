@@ -122,8 +122,7 @@ void modbusMaster_task(void *argument) {
         so channel 0 still reserves first and keeps row 0. */
     base = device_bank_reserve(MODBUS_SLAVE_LAST - MODBUS_SLAVE_FIRST + 1);
     if (base < 0) {
-        PRT_INFO("modbusMaster: ch%d no room in the device bank
-", port->channel);
+        PRT_INFO("modbusMaster: ch%d no room in the device bank\r\n", port->channel);
         vTaskDelete(NULL);
         return;
     }

@@ -117,8 +117,7 @@ void protoTemplate_task(void *argument) {
         its own, so nothing here has to know what the others took. */
     base = device_bank_reserve(PROTO_DEVICE_CNT);
     if (base < 0) {
-        PRT_INFO("protoTemplate: ch%d no room in the device bank
-", port->channel);
+        PRT_INFO("protoTemplate: ch%d no room in the device bank\r\n", port->channel);
         vTaskDelete(NULL);
         return;
     }
