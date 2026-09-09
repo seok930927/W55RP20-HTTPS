@@ -746,10 +746,12 @@ if ((port->channel == SEG_DATA0_CH) && (opmode == DEVICE_AT_MODE)) {
 | `stop_bit` | 0=`stop_bit1`(1), 1=`stop_bit2`(2) | `stop_bit_table[]` | (웹 미노출) | — |
 | `parity` | 0=none, 1=odd, 2=even, **3=space, 4=mark** | `parity_table[]` = `"N","ODD","EVEN","SPACE","MARK"` | 0~4 | 4 |
 | `flow_ctrl` | 0=none, 1=xon_xoff, 2=rts_cts, 3=rtsonly, 4=reverserts | `flow_ctrl_table[]` | 0/1/2 만 노출 | 4 |
-| `protocol` | 0=none, 1=`modbus_rtu`, 2=`modbus_ascii`, 3=`sec_ups`, **4=`protocol_custom`** | — | 0~4 | 4 |
+| `protocol` | 0=none(S/T/R), 1=`modbus_rtu`, 2=`modbus_ascii`, 3=`sec_ups`, 4=`protocol_custom` | — | **0~1** | 1 |
 | `UART_IF_*` | 0=`RS232_TTL`, 1=`RS422`, 2=`RS485`, 3=`RS485_REVERSE`, 4=`SPI_IF_SLAVE` | `uart_if_table[]` | 0~3 | 3 |
 
-`sec_ups`(3) 는 아직 구현이 없다. `protocol_custom`(4) 는 [protoTemplate.c](port/app/platform_handler/src/protoTemplate.c) 가 잡고 있다. 붙이려면 [4.4](#44-새-시리얼-프로토콜-추가) 참조.
+**enum 에 이름이 있는 것과 고를 수 있는 것은 다르다.** 드롭다운과 POST 검증은 전부 [serialProtocol.c](port/app/platform_handler/src/serialProtocol.c) 의 표에서 나오고, 그 표는 **구현된 것만** 담는다 — 현재 `none`(S/T/R) 과 `modbus_rtu` 둘이다.
+
+`modbus_ascii`(2), `sec_ups`(3), `protocol_custom`(4) 는 enum 에만 있고 표에는 없다. 구현이 없는 항목을 드롭다운에 두면 **고르면 저장까지 되는데 아무 일도 안 일어나기 때문**이다. 구현하면 표에 행을 추가한다 — [4.4](#44-새-시리얼-프로토콜-추가) 참조.
 
 ### 같은 필드에 두 개의 enum이 있다
 
@@ -1063,7 +1065,14 @@ Enterprise 번호(22210)가 박혀 있는 곳 — 바꾸려면 **전부** 고쳐
 
 ## 4.4 새 시리얼 프로토콜 추가
 
-**[protoTemplate.c](port/app/platform_handler/src/protoTemplate.c) 를 복사해서 시작하라.** 빌드되는 상태로 들어 있고, 포트 세팅·DE 제어·AT 모드 양보·뱅크 등록이 이미 되어 있다. 채울 곳은 `protoTemplate_poll()` 안의 TODO 두 개뿐이다. 웹 Mode 드롭다운의 **Custom**(값 4)이 이 파일에 묶여 있다.
+**이미 만들어진 예가 하나 있다 — S/T/R 이다.** [sensorUart.c](port/app/platform_handler/src/sensorUart.c) 가 그것이고, 이 펌웨어에 붙은 커스텀 프로토콜은 지금 이 하나뿐이다. 직렬로 들어온 한 줄을 파싱해서 device bank 에 넣고 답을 돌려주는, 프로토콜이 해야 할 일을 전부 갖춘 최소 예제다. **새로 만들 때 이것과 같은 모양으로 하면 된다.**
+
+빈 골격에서 시작하고 싶으면 [protoTemplate.c](port/app/platform_handler/src/protoTemplate.c) 를 복사한다. 빌드되는 상태로 들어 있고 포트 세팅·DE 제어·AT 모드 양보·뱅크 등록이 되어 있으며, 채울 곳은 `protoTemplate_poll()` 안의 TODO 두 개뿐이다.
+
+> 두 파일 모두 웹 Mode 드롭다운에는 나오지 않는다. 드롭다운은
+> [serialProtocol.c](port/app/platform_handler/src/serialProtocol.c) 의 표 그대로이고,
+> 그 표는 **장비를 쓰는 사람이 고를 수 있는 것**만 담는다. 펌웨어를 고치는 사람에게만
+> 의미가 있는 항목은 넣지 않는다. 만든 프로토콜은 표에 **자기 이름으로** 추가한다.
 
 ### 두 가지 구현 스타일
 
@@ -1078,6 +1087,13 @@ Enterprise 번호(22210)가 박혀 있는 곳 — 바꾸려면 **전부** 고쳐
 
 프로토콜이 존재한다는 사실은 **[serialProtocol.c](port/app/platform_handler/src/serialProtocol.c) 의 `g_serial_protocol[]` 한 곳**에만 적는다.
 태스크 생성·소유권 판정·웹 검증 상한·Mode 드롭다운이 전부 이 표에서 나온다.
+
+> ⚠ **행을 추가하기 전에 상한 두 개를 먼저 풀어라.**
+> [uartHandler.c:191](port/app/platform_handler/src/uartHandler.c#L191) 은 `sec_ups`(3),
+> [segcp.c:894](port/app/configuration/src/segcp.c#L894) 는 `modbus_ascii`(2) 를 상한으로
+> 갖고 있다. 드라이버는 부팅 시 그 위의 번호를 `protocol_none` 으로 덮어쓰므로,
+> 4번 이상으로 추가하면 구현을 다 해도 태스크가 뜨지 않는다.
+> 둘을 `serial_protocol_max_id()` 로 바꾸면 된다.
 
 | # | 파일 | 할 일 |
 |---|---|---|
@@ -1109,38 +1125,56 @@ Enterprise 번호(22210)가 박혀 있는 곳 — 바꾸려면 **전부** 고쳐
 #include "pico/stdlib.h"
 #include "FreeRTOS.h"
 #include "task.h"
-#include "seg.h"           /* SEG_DATA0_CH, opmode, DEVICE_AT_MODE */
 #include "uartHandler.h"   /* SerialPort, serial_port_* */
-#include "sensor.h"
+#include "sensor.h"        /* device_bank_reserve, device_setValue */
 #include "WIZ5XXSR-RP_Debug.h"
 
+#define MYPROTO_DEVICE_CNT  1      /* 이 프로토콜이 쓸 device bank 행 수 */
+
 void myproto_init(SerialPort *port) {
-    serial_port_setup(port);                       /* baud/포맷/핀/DE 전부 */
-    uart_set_hw_flow(port->uart, false, false);    /* 이 프로토콜은 흐름제어 안 씀 */
+    serial_port_setup(port);            /* baud/포맷/핀/DE 전부 */
+    serial_port_hw_flow_disable(port);  /* 이 프로토콜은 RTS/CTS 안 씀 */
 
     PRT_INFO("myproto: ready (ch%d)\r\n", port->channel);
 }
 
 void myproto_task(void *argument) {
     SerialPort *port = (SerialPort *)argument;
+    int base;
+
+    if (port == NULL) {
+        vTaskDelete(NULL);
+        return;
+    }
+
+    /*  행을 고르지 말고 받아라.
+        다른 프로토콜이 뭘 썼는지 몰라도 겹치지 않는다. */
+    base = device_bank_reserve(MYPROTO_DEVICE_CNT);
+    if (base < 0) {
+        vTaskDelete(NULL);              /* bank 에 자리가 없다 */
+        return;
+    }
 
     myproto_init(port);
-    device_assign(0, "UPS-1");        /* 응답 전에도 화면에 보이도록 */
+    device_assign((uint8_t)base, "UPS-1");   /* 응답 전에도 화면에 보이도록 */
 
     while (1) {
-        /*  AT 모드가 설정 포트를 가져가면 폴링을 멈춘다.
-            안 그러면 segcp 와 같은 FIFO 를 놓고 싸운다. */
-        if ((port->channel == SEG_DATA0_CH) && (opmode == DEVICE_AT_MODE)) {
+        /*  커맨드 모드가 그 포트를 가져간 동안은 폴링을 멈춘다. 안 그러면
+            설정 처리기와 같은 FIFO 를 놓고 싸운다.
+            포트 번호를 따질 필요는 없다 — 헬퍼가 판단한다. */
+        if (serial_port_in_command_mode(port)) {
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
+
+        serial_port_flush_rx(port);     /* 지난 교신의 잔여 바이트 버리기 */
 
         /* 1) 요청 송신 — DE 는 serial_port_puts() 가 알아서 감싼다 */
         serial_port_puts(port, req, sizeof(req));
 
         /* 2) 응답 수신 — 반드시 serial_port_getc() 로 (AT 이스케이프 감시) */
-        /* 3) 파싱 → device_setValue(0, col, value);
-              변화를 알릴 거면 snmp_notify_device(0); */
+        /* 3) 파싱 → device_setValue(base, col, value);
+              변화를 알릴 거면 snmp_notify_device(base); */
 
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
@@ -1153,6 +1187,8 @@ void myproto_task(void *argument) {
 |---|---|
 | ☐ | 수신은 **반드시 `serial_port_getc()`** 로. `uart_getc()` 를 직접 부르면 그 포트에서 AT 진입이 죽는다 ([3.6](#36-at-이스케이프)) |
 | ☐ | 태스크 인자는 **`SerialPort *`** 다. `uart_inst_t *` 를 넘기면 `port->channel` 에서 죽는다 |
+| ☐ | device bank 행은 **`device_bank_reserve()` 로 받아라.** 상수로 고르면 다른 프로토콜과 겹쳐도 아무도 모른다 |
+| ☐ | `port->uart` 를 직접 만지지 마라. 흐름제어 끄기·수신 비우기까지 `serial_port_*` 에 다 있다 |
 | ☐ | 수신 대기 루프에서 **`vTaskDelay()` 로 양보**하라. 바쁜 대기는 워치독을 굶긴다 |
 | ☐ | RX FIFO 는 32바이트다. 그보다 긴 프레임은 대기 중에도 계속 긁어와야 한다 |
 | ☐ | 그 포트를 가져가면 `sensorUart_claim()` 이 비키도록 조건을 추가하라 |
