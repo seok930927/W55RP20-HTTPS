@@ -262,7 +262,7 @@ SNMP 테이블과 웹 JSON은 전부 여기서 읽어간다.
 
 [경로 B] Modbus-RTU 마스터   (그 포트의 protocol == modbus_rtu 일 때, ISR 없음)
 
-  modbusMaster_task(&g_serial_port[p]) ─► modbus_read_th(port, slave)
+  modbusMaster_task(&g_serial_port[p]) ─► modbus_read_values(port, slave)
        ├─ serial_port_tx_enable/disable() 로 DE 를 감싸 요청 송신
        ├─ mb_recv(port, ...) ─► serial_port_getc() 로 응답 수신
        └─ device_setValue(base + slave-1, 0=온도, 1=습도)

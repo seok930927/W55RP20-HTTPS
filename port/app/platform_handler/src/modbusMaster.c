@@ -28,9 +28,17 @@ extern uint32_t baud_table[];
 #define MODBUS_SLAVE_FIRST   1
 #define MODBUS_SLAVE_LAST    4
 
-#define MODBUS_RSP_LEN       9      /* slave,func,bytecount,temp(2),hum(2),crc(2) */
+/* slave, func, byte count, MODBUS_REG_COUNT registers, CRC16 */
+#define MODBUS_RSP_LEN       (5 + 2 * MODBUS_REG_COUNT)
+
 #define MODBUS_RSP_TIMEOUT   150    /* ms to wait for a full response frame      */
 #define MODBUS_POLL_PERIOD   1000   /* ms between full poll cycles               */
+
+/*  The request carries the register quantity in a byte and the reply its byte
+    count in a byte, and mb_recv() fills a fixed buffer -- so the column count
+    has to stay inside what both can say. */
+_Static_assert(MODBUS_REG_COUNT >= 1 && MODBUS_REG_COUNT <= 125,
+               "DEVICE_VALUE_COLS must be 1..125 for the Modbus master");
 
 /*  Configure `uart` for Modbus. baud/format come from that port's serial_option
     so the web serial settings apply (sensor default is 9600 8N1 — set Baud=9600).
@@ -42,12 +50,26 @@ void modbusMaster_init(SerialPort *port) {
     serial_port_hw_flow_disable(port);            /* Modbus RTU never uses RTS/CTS */
     opt = port->opt;
 
-    PRT_INFO("modbusMaster: master ready (ch%d, %lu-%u-%s-%u)\r\n",
-             port->channel,
+    PRT_INFO("modbusMaster: master ready (ch%d TX=GP%u RX=GP%u, %lu-%u-%s-%u)\r\n",
+             port->channel, port->tx_pin, port->rx_pin,
              (unsigned long)baud_table[opt->baud_rate < baud_max ? opt->baud_rate : baud_115200],
              (opt->data_bits == word_len7) ? 7 : 8,
              parity_table[opt->parity <= parity_mark ? opt->parity : parity_none],
              (opt->stop_bits == stop_bit2) ? 2 : 1);
+}
+
+/*  Hex into `buf`, stopping at the buffer instead of past it. Returns buf so a
+    log call can use it inline. Replaces a row of fixed %02X slots that had to
+    be re-counted by hand every time a frame length changed. */
+static const char *hexdump(char *buf, size_t cap, const uint8_t *p, int len) {
+    size_t used = 0;
+
+    for (int i = 0; i < len && used + 4 <= cap; i++) {
+        snprintf(buf + used, cap - used, "%02X ", p[i]);
+        used += 3;
+    }
+    buf[used ? used - 1 : 0] = '\0';   /* drop the trailing space */
+    return buf;
 }
 
 /* Read up to `want` bytes within `timeout_ms`. Returns the number received. */
@@ -70,9 +92,11 @@ static int mb_recv(SerialPort *port, uint8_t *buf, int want, uint32_t timeout_ms
     return got;
 }
 
-int modbus_read_th(SerialPort *port, uint8_t slave, int16_t *temp, int16_t *hum) {
-    /* Request: read 2 input registers (Func 04) from address 0x0000. */
-    uint8_t req[8] = { slave, 0x04, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00 };
+int modbus_read_values(SerialPort *port, uint8_t slave, int16_t *out) {
+    /*  Request: read MODBUS_REG_COUNT input registers (Func 04) from address
+        0x0000. The quantity is 16-bit on the wire; the static assert above
+        keeps it inside the low byte. */
+    uint8_t req[8] = { slave, 0x04, 0x00, 0x00, 0x00, MODBUS_REG_COUNT, 0x00, 0x00 };
     uint16_t crc = usMBCRC16(req, 6);
     req[6] = (uint8_t)(crc & 0xFF);   /* Modbus CRC: low byte first */
     req[7] = (uint8_t)(crc >> 8);
@@ -87,25 +111,30 @@ int modbus_read_th(SerialPort *port, uint8_t slave, int16_t *temp, int16_t *hum)
 
     uint8_t rsp[MODBUS_RSP_LEN];
     int n = mb_recv(port, rsp, MODBUS_RSP_LEN, MODBUS_RSP_TIMEOUT);
+    char txs[3 * sizeof(req) + 1];
+    char rxs[3 * MODBUS_RSP_LEN + 1];
+
     /* DIAG: show what we sent and what (if anything) came back. */
-    PRT_INFO("modbus TX: %02X %02X %02X %02X %02X %02X %02X %02X | RX %d bytes: "
-             "%02X %02X %02X %02X %02X %02X %02X %02X %02X\r\n",
-             req[0], req[1], req[2], req[3], req[4], req[5], req[6], req[7], n,
-             n > 0 ? rsp[0] : 0, n > 1 ? rsp[1] : 0, n > 2 ? rsp[2] : 0,
-             n > 3 ? rsp[3] : 0, n > 4 ? rsp[4] : 0, n > 5 ? rsp[5] : 0,
-             n > 6 ? rsp[6] : 0, n > 7 ? rsp[7] : 0, n > 8 ? rsp[8] : 0);
+    PRT_INFO("modbus ch%d TX: %s | RX %d bytes: %s\r\n",
+             port->channel,
+             hexdump(txs, sizeof(txs), req, (int)sizeof(req)),
+             n, hexdump(rxs, sizeof(rxs), rsp, n));
+
     if (n != MODBUS_RSP_LEN) {
         return -1;                               /* timeout / short frame */
     }
     if (usMBCRC16(rsp, MODBUS_RSP_LEN) != 0) {
         return -2;                               /* CRC mismatch */
     }
-    if (rsp[0] != slave || rsp[1] != 0x04 || rsp[2] != 0x04) {
+    if (rsp[0] != slave || rsp[1] != 0x04
+            || rsp[2] != (uint8_t)(2 * MODBUS_REG_COUNT)) {
         return -3;                               /* wrong addr/func/bytecount */
     }
 
-    *temp = (int16_t)(((uint16_t)rsp[3] << 8) | rsp[4]);   /* reg 30001 */
-    *hum  = (int16_t)(((uint16_t)rsp[5] << 8) | rsp[6]);   /* reg 30002 */
+    /* Register n -> value column n, big-endian as Modbus sends them. */
+    for (uint8_t i = 0; i < MODBUS_REG_COUNT; i++) {
+        out[i] = (int16_t)(((uint16_t)rsp[3 + 2 * i] << 8) | rsp[4 + 2 * i]);
+    }
     return 0;
 }
 
@@ -145,16 +174,44 @@ void modbusMaster_task(void *argument) {
             continue;
         }
         for (uint8_t s = MODBUS_SLAVE_FIRST; s <= MODBUS_SLAVE_LAST; s++) {
-            int16_t t = 0, h = 0;
-            int r = modbus_read_th(port, s, &t, &h);
+            int16_t v[MODBUS_REG_COUNT];
+            int r = modbus_read_values(port, s, v);
+
             if (r == 0) {
                 uint8_t idx = (uint8_t)(s - MODBUS_SLAVE_FIRST);
-                device_bank_setValue(src, idx, 0, t);   /* temperature */
-                device_bank_setValue(src, idx, 1, h);   /* humidity    */
-                PRT_INFO("modbusMaster: slave %u  T=%d (%.1fC)  H=%d (%.1f%%)\r\n",
-                         s, t, t / 10.0, h, h / 10.0);
+                char   line[24 * MODBUS_REG_COUNT];
+                size_t ln = 0;
+
+                line[0] = '\0';
+
+                /*  Every column, not just the ones this protocol happens to
+                    care about. A column left alone keeps whatever was in it,
+                    which the web page draws as a reading of 0 rather than as
+                    "no value" -- an alarm column that always says normal. */
+                for (uint8_t c = 0; c < MODBUS_REG_COUNT; c++) {
+                    device_bank_setValue(src, idx, c, v[c]);
+                }
+
+                /*  Formatting is a second pass on purpose. Sharing the loop
+                    above would tie publishing to the log buffer: a column name
+                    long enough to fill `line` would stop the loop and silently
+                    drop every column after it from the bank. Running out of
+                    room here shortens the log line and nothing else. */
+                for (uint8_t c = 0; c < MODBUS_REG_COUNT; c++) {
+                    const ValueColumn *vc = valueColumn_get(c);
+                    int w = snprintf(line + ln, sizeof(line) - ln, "%s%s=%d",
+                                     ln ? "  " : "", vc ? vc->name : "?", v[c]);
+
+                    if (w < 0 || (size_t)w >= sizeof(line) - ln) {
+                        break;              /* keep the line as far as it got */
+                    }
+                    ln += (size_t)w;
+                }
+                PRT_INFO("modbusMaster: ch%d slave %u  %s\r\n",
+                         port->channel, s, line);
             } else {
-                PRT_INFO("modbusMaster: slave %u poll error %d\r\n", s, r);
+                PRT_INFO("modbusMaster: ch%d slave %u poll error %d\r\n",
+                         port->channel, s, r);
             }
             vTaskDelay(pdMS_TO_TICKS(50));   /* small gap between slaves */
         }

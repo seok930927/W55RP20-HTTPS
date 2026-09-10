@@ -93,12 +93,19 @@ int protoTemplate_poll(SerialPort *port) {
         sensor.c, and the SNMP OIDs follow from it. Nothing else to wire up.
 
             uint8_t src = (uint8_t)port->channel;
-            device_bank_setValue(src, 0, 0, value_from(rsp));
+            for (uint8_t c = 0; c < DEVICE_VALUE_COLS; c++) {
+                device_bank_setValue(src, 0, c, value_from(rsp, c));
+            }
             snmp_notify_device(device_bank_row(src, 0));  // only for a trap
 
         The 0 after src is which of this port's own devices you are writing,
         counting from zero -- not a bank row. Use 1, 2 ... for the rest if you
         reserved more than one.
+
+        Fill EVERY column. One you skip keeps whatever was there before, and
+        the web page draws that as a reading rather than as a blank -- so a
+        protocol with nothing to say for a column should still write something
+        it chose. modbusMaster.c does this by reading one register per column.
         ------------------------------------------------------------------ */
     (void)rsp;
 
