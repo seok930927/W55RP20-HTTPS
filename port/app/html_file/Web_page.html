@@ -155,6 +155,35 @@ th {
     font-size: 11px;
     padding: 0 2px;
 }
+/* strip under a page heading: what this port is, and where SNMP reads it */
+.port-info {
+    margin: 12px 12px 0;
+    padding: 6px 10px;
+    border: 1px solid #9aa7b1;
+    background: #f2f6fa;
+    font-size: 11px;
+    line-height: 1.9;
+    color: #33475b;
+}
+.port-info b {
+    color: #1a3a5c;
+}
+.port-info .oid {
+    font-family: Consolas, "Courier New", monospace;
+    color: #a0410d;
+}
+.port-info .sep {
+    color: #9aa7b1;
+    padding: 0 6px;
+}
+/* the OID column number, parked under a value column heading */
+.sensor-table .oid-col {
+    display: block;
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 10px;
+    font-weight: normal;
+    color: #a0410d;
+}
 .footer {
     padding: 8px 12px 12px;
     text-align: center;
@@ -341,6 +370,7 @@ th {
             <!-- 온습도및입력 -->
             <div id="view-device">
                 <div class="content-header">[ 온습도 센서 및 입출력데이터 ]</div>
+                <div class="port-info" id="port-info"></div>
                 <section class="section">
                     <div class="section-title">활성 디바이스</div>
                     <table class="sensor-table">
@@ -370,6 +400,7 @@ th {
             <!-- 온습도및입력 2 (시리얼 포트 2) -->
             <div id="view-device2" style="display:none">
                 <div class="content-header">[ 온습도 센서 및 입출력데이터 — 시리얼 2 ]</div>
+                <div class="port-info" id="port-info2"></div>
                 <section class="section">
                     <div class="section-title">활성 디바이스</div>
                     <table class="sensor-table">
@@ -773,6 +804,19 @@ function fmtValue(v, col){
     if(col.unit) txt += ' ' + col.unit;
     return escHtml(txt);
 }
+/*  Where a manager finds the same values, mirrored from snmp_custom.c: a cell
+    is <deviceEntry>.<column>.<row>. Column 1 is the row number and column 2 the
+    name, so the value columns start at 3 and follow the order sensor.c lists
+    them in -- value[c] is column OID_VALUE_COL + c. The row is the number the
+    tables show as Idx. Display only; nothing here speaks SNMP. */
+var OID_ENTRY     = '1.3.6.1.4.1.22210.2.1';
+var OID_TRAP      = '1.3.6.1.4.1.22210.0.1';
+var OID_VALUE_COL = 3;
+
+function oidCell(valueCol, idx){
+    return OID_ENTRY + '.' + (OID_VALUE_COL + valueCol) + '.' + idx;
+}
+
 /*  digitalInput.c names each row "IO<terminal> GP<pin>", so the page can draw
     the connector without keeping a pin map of its own. State rides in the
     alarm column, because the bank gives every device the same columns. */
@@ -795,6 +839,12 @@ function dinState(e){
     var v = (e.dev.values && e.dev.values[DIN_STATE_COL]!=null) ? e.dev.values[DIN_STATE_COL] : 0;
     if(v===2) return '<span class="din-alarm">2</span>';
     return (v===1) ? '1' : '-';
+}
+
+/*  Hovering a contact shows the OID it is readable at, which keeps the OID out
+    of the connector drawing -- sixteen of them printed would bury the states. */
+function dinTitle(e){
+    return e ? ' title="' + oidCell(DIN_STATE_COL, e.dev.index) + '"' : '';
 }
 
 /*  Drawn on every device page: the contact inputs belong to the unit, not to
@@ -834,8 +884,8 @@ function updDinBlock(sfx, list){
             html += '<tr>'
                  +  '<td class="din-io">'+(L ? 'I/O_'+L.io : '')+'</td>'
                  +  '<td class="din-pin">'+(L ? escHtml(L.gp) : '')+'</td>'
-                 +  '<td class="din-st">'+dinState(L)+'</td>'
-                 +  '<td class="din-st">'+dinState(R)+'</td>'
+                 +  '<td class="din-st"'+dinTitle(L)+'>'+dinState(L)+'</td>'
+                 +  '<td class="din-st"'+dinTitle(R)+'>'+dinState(R)+'</td>'
                  +  '<td class="din-pin">'+(R ? escHtml(R.gp) : '')+'</td>'
                  +  '<td class="din-io">'+(R ? 'I/O_'+R.io : '')+'</td>'
                  +  '</tr>';
@@ -850,6 +900,45 @@ function updDinBlock(sfx, list){
     value, so the page never needs its own copy of the bank layout. */
 var VIEW_SRC = { 'sensor': 0, 'sensor2': 1 };
 
+/*  The port in `ports` that serves `ch`. Matched on the channel rather than on
+    the array position, because a port that has not been set up yet is left out
+    of the array entirely. */
+function portByCh(ports, ch){
+    for(var i=0; i<ports.length; i++){
+        if(ports[i].ch === ch) return ports[i];
+    }
+    return null;
+}
+
+/*  The strip above a device table: which port the page is showing, how that
+    port is configured, and the OID shape for the values below it. */
+function updPortInfo(sfx, ch, port, cols){
+    var el = document.getElementById('port-info'+sfx);
+    if(!el) return;
+
+    var legend = '';
+    for(var c=0; c<cols.length; c++){
+        legend += (c ? ', ' : '') + (OID_VALUE_COL+c) + '=' + escHtml(cols[c].name);
+    }
+
+    var head;
+    if(!port){
+        head = '<b>시리얼 '+(ch+1)+'</b><span class="sep">|</span>포트 정보 없음';
+    } else {
+        head = '<b>시리얼 '+(port.ch+1)+'</b> '+escHtml(port['if'])
+             + '<span class="sep">|</span>프로토콜 <b>'+escHtml(port.proto)+'</b>'
+             + '<span class="sep">|</span>'
+             + port.baud+'-'+port.bits+'-'+escHtml(port.par)+'-'+port.stop
+             + '<span class="sep">|</span>TX=GP'+port.tx+' RX=GP'+port.rx
+             + ((port.de!=null && port.de!==255) ? ' DE=GP'+port.de : '');
+    }
+
+    el.innerHTML = head
+        + '<br><b>SNMP</b> <span class="oid">'+OID_ENTRY+'.&lt;열&gt;.&lt;Idx&gt;</span>'
+        + '<span class="sep">|</span>'+legend
+        + '<span class="sep">|</span>트랩 <span class="oid">'+OID_TRAP+'</span>';
+}
+
 /*  Draw one port's devices into its own table. */
 function updTable(suffix, cols, devs){
     var head  = document.getElementById('sensor-head'+suffix);
@@ -860,7 +949,10 @@ function updTable(suffix, cols, devs){
     var hh = '<tr><th class="col-idx">Idx</th><th>이름</th>';
     for(var c=0; c<cols.length; c++){
         var u = cols[c].unit ? ' ('+escHtml(cols[c].unit)+')' : '';
-        hh += '<th>'+escHtml(cols[c].name)+u+'</th>';
+        /*  The OID column goes under the name, so a full cell OID reads off the
+            header and the Idx together without a lookup anywhere else. */
+        hh += '<th>'+escHtml(cols[c].name)+u
+           +  '<span class="oid-col">.'+(OID_VALUE_COL+c)+'.&lt;Idx&gt;</span></th>';
     }
     head.innerHTML = hh + '</tr>';
 
@@ -873,7 +965,8 @@ function updTable(suffix, cols, devs){
         html += '<tr><td class="col-idx">'+dev.index+'</td><th>'+escHtml(dev.name)+'</th>';
         for(var c=0; c<cols.length; c++){
             var v = (dev.values && dev.values[c]!=null) ? dev.values[c] : 0;
-            html += '<td>'+fmtValue(v, cols[c])+'</td>';
+            html += '<td title="'+oidCell(c, dev.index)+'">'
+                 +  fmtValue(v, cols[c])+'</td>';
         }
         html += '</tr>';
     }
@@ -897,6 +990,12 @@ function upd(d){
     updTable('',  cols, byPort[VIEW_SRC['sensor']]  || []);
     updTable('2', cols, byPort[VIEW_SRC['sensor2']] || []);
     updDin(din);
+
+    var ports = d.ports || [];
+    updPortInfo('',  VIEW_SRC['sensor'],
+                portByCh(ports, VIEW_SRC['sensor']),  cols);
+    updPortInfo('2', VIEW_SRC['sensor2'],
+                portByCh(ports, VIEW_SRC['sensor2']), cols);
 
     document.getElementById('comm_status').textContent=d.comm.status;
     document.getElementById('recv_cs').textContent=d.comm.recv_cs;

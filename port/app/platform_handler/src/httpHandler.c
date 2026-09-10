@@ -310,8 +310,11 @@ static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
         Decoded wire shape:
         {
           "columns":[{"name":"Temperature","unit":"C","scale":-1}, ...],
+          "ports":[{"ch":0,"if":"TTL/RS-232","proto":"Modbus RTU",
+                    "baud":115200,"bits":8,"par":"N","stop":1,
+                    "tx":4,"rx":5,"de":255}, ...],
           "devices":[
-            {"index":1,"name":"...","values":[235,600,0]},
+            {"index":1,"name":"...","src":0,"values":[235,600,0]},
             ...
           ],
           "comm":{"status":..,"recv_cs":..,"calc_cs":..,"check":..,"flag":..}
@@ -344,7 +347,7 @@ static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
                       vc ? vc->scale : 0);
     }
     if (n > 0 && n < (int)sizeof(chunk)) {
-        n += snprintf(chunk + n, sizeof(chunk) - n, "],\"devices\":[");
+        n += snprintf(chunk + n, sizeof(chunk) - n, "],\"ports\":[");
     }
     if (n <= 0 || n >= (int)sizeof(chunk)) {
         return -1;
@@ -352,6 +355,72 @@ static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
     if (https_send_http_chunk(tls_ctx, chunk, (size_t)n) < 0) {
         return -1;
     }
+
+    /*  One chunk per serial port. The page prints these verbatim, so what a
+        reader sees is what serial_port_setup() actually resolved -- a second
+        copy of the defaults kept in the HTML would start lying the first time
+        somebody changed them. */
+    for (uint8_t p = 0; p < SERIAL_PORT_CNT; p++) {
+        const SerialPort *sp = &g_serial_port[p];
+        const struct __serial_option *so = sp->opt;
+        const SerialProtocol *pr = serial_protocol_find(sp->protocol);
+        unsigned bits, de;
+
+        if (so == NULL) {
+            continue;                /* never went through serial_port_setup() */
+        }
+
+        /*  What the PL011 will really frame. The web form offers 9 data bits
+            and serial_port_setup() clamps that to 8 -- the part has no 9-bit
+            mode -- without writing the clamp back to the stored setting, so
+            printing the setting would tell somebody chasing a dead link that
+            the framing is 9 bits while the wire carries 8. */
+        bits = word_len_table[(so->data_bits <= word_len9) ? so->data_bits
+                              : word_len8];
+        if (bits > 8) {
+            bits = 8;
+        }
+
+        /*  The direction line, but only where one is driven. Every port
+            resolves a de_pin whether it needs one or not: with nothing
+            configured it falls back to the board default, and on channel 0
+            that default is the port's own RTS pin. Only RS-485 and its reverse
+            variant toggle it (serial_port_tx_enable), so reporting it on the
+            others would point a wiring diagram at a flow-control pin. */
+        de = (sp->intf == UART_IF_RS485 || sp->intf == UART_IF_RS485_REVERSE)
+             ? sp->de_pin : SERIAL_PIN_NONE;
+
+        n = snprintf(chunk, sizeof(chunk),
+                     "%s{\"ch\":%d,\"if\":\"%s\",\"proto\":\"%s\","
+                     "\"baud\":%lu,\"bits\":%u,\"par\":\"%s\",\"stop\":%u,"
+                     "\"tx\":%u,\"rx\":%u,\"de\":%u}",
+                     first ? "" : ",",
+                     sp->channel,
+                     (const char *)uart_if_table[(sp->intf <= SPI_IF_SLAVE)
+                         ? sp->intf : UART_IF_RS232_TTL],
+                     pr ? pr->name : "?",
+                     (unsigned long)baud_table[(so->baud_rate < baud_max)
+                                               ? so->baud_rate : baud_115200],
+                     bits,
+                     (const char *)parity_table[(so->parity <= parity_mark)
+                                                ? so->parity : parity_none],
+                     (unsigned)stop_bit_table[(so->stop_bits <= stop_bit2)
+                                              ? so->stop_bits : stop_bit1],
+                     sp->tx_pin, sp->rx_pin, de);
+        if (n <= 0 || n >= (int)sizeof(chunk)) {
+            continue;                /* overflow -- skip this port */
+        }
+        if (https_send_http_chunk(tls_ctx, chunk, (size_t)n) < 0) {
+            return -1;
+        }
+        first = 0;
+    }
+
+    n = snprintf(chunk, sizeof(chunk), "],\"devices\":[");
+    if (https_send_http_chunk(tls_ctx, chunk, (size_t)n) < 0) {
+        return -1;
+    }
+    first = 1;
 
     /* One chunk per enabled device */
     for (int d = 0; d < DEVICE_COUNT; d++) {
