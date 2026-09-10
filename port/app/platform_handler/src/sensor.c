@@ -143,12 +143,16 @@ int device_assign(uint8_t dev, const char *name) {
     if (name == NULL) {
         return -1;
     }
-    /*  The publisher is a property of the row, not of what is on it, so it
-        outlives the clear -- a protocol re-naming its device must not lose
-        which port the row belongs to. */
-    uint8_t src = g_devices[dev].source;
-    memset(&g_devices[dev], 0, sizeof(g_devices[dev]));
-    g_devices[dev].source = src;
+    /*  Names the row and turns it on. It does NOT clear the values.
+
+        Every caller uses this to register a device as its task starts, and
+        clearing there throws away whatever the row already held -- which is
+        how the seeded readings vanished the moment the Modbus master
+        registered its slaves over them, leaving zeros that looked like
+        measurements. A device that cannot be reached should keep showing what
+        it last said, not report 0.
+
+        device_unassign() is what actually empties a row. */
     g_devices[dev].enabled = 1;
     strncpy(g_devices[dev].name, name, DEVICE_NAME_MAX - 1);
     g_devices[dev].name[DEVICE_NAME_MAX - 1] = '\0';
