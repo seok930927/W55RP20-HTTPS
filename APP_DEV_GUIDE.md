@@ -116,8 +116,10 @@ SNMP 테이블과 웹 JSON은 전부 여기서 읽어간다.
 |---|---|
 | `uartHandler.c/.h` | **UART 드라이버 계층.** 포맷 설정, RS-485 DE 제어, 바이트 입출력 |
 | `sensorUart.c/.h` | S/T/R 텍스트 프로토콜 파서 + 두 포트 RX ISR |
-| `modbusMaster.c/.h` | Modbus-RTU 마스터 폴러 (온습도 센서용) |
-| `sensor.c/.h` | device bank |
+| `modbusMaster.c/.h` | Modbus-RTU 마스터 폴러. 값 컬럼 수만큼 입력 레지스터를 읽는다 |
+| `protoTemplate.c/.h` | **새 프로토콜 골격.** 복사해서 고치라고 있는 파일 ([4.4](#44-새-시리얼-프로토콜-추가)) |
+| `digitalInput.c/.h` | CN10/CN11 접점 입력 16개 → device bank. `DIN_COUNT` 가 없는 보드에서는 태스크가 즉시 종료 |
+| `sensor.c/.h` | device bank + 값 컬럼 카탈로그 `g_value_columns[]` |
 | `snmpHandler.c/.h` | SNMP 에이전트 태스크, 트랩 큐, 런타임 설정 주입 |
 | `snmpBuffer.c/.h` | 레거시 SNMP 데이터 버퍼 (웹 "통신데이타" 탭에서만 사용) |
 | `httpHandler.c/.h` | **HTTPS 서버 전체** — 라우팅, JSON GET/POST, 세션 |
@@ -175,7 +177,8 @@ SNMP 테이블과 웹 JSON은 전부 여기서 읽어간다.
 | `SEGCP_tcp_Task` | `segcp_tcp_task` | [segcp.c:1724](port/app/configuration/src/segcp.c#L1724) | 51 | **31** ⚠ | 1024 / 4 KB | 설정툴 TCP 접속 (소켓 2) |
 | `SEGCP_serial_Task` | `segcp_serial_task` | [segcp.c:1740](port/app/configuration/src/segcp.c#L1740) | 50 | **31** ⚠ | 1024 / 4 KB | 시리얼 AT 커맨드 (`+++` 진입) |
 | `Sensor_UART_Task` | `sensorUart_task` | [sensorUart.c:360](port/app/platform_handler/src/sensorUart.c#L360) | 9 | 9 | 1024 / 4 KB | S/T/R 라인 파싱 |
-| `Modbus_ch0` / `Modbus_ch1` | `modbusMaster_task` | [modbusMaster.c](port/app/platform_handler/src/modbusMaster.c) | 9 | 9 | 1024 / 4 KB | **포트별 조건부 생성** — 그 포트의 `protocol == modbus_rtu` 일 때만. 인자로 `&g_serial_port[p]` 전달 |
+| `Modbus_ch0` / `Modbus_ch1` | `modbusMaster_task` | [modbusMaster.c](port/app/platform_handler/src/modbusMaster.c) | 9 | 9 | 1024 / 4 KB | **포트별 조건부 생성** — 그 포트의 `protocol == modbus_rtu` 일 때만. 인자로 `&g_serial_port[p]` 전달. 스택·우선순위는 `g_serial_protocol[]` 행에서 온다 |
+| `Digital_Input_Task` | `digitalInput_task` | [digitalInput.c:146](port/app/platform_handler/src/digitalInput.c#L146) | 8 | 8 | 512 / 2 KB | CN10/CN11 접점 16개를 200 ms 마다 읽어 뱅크에 기록. **시리얼 프로토콜 태스크보다 뒤에 생성** — 뱅크 행을 먼저 온 순서로 나눠주기 때문 |
 | `Tmr Svc` | (FreeRTOS 내장) | — | 31 | 31 | 1024 / 4 KB | 소프트웨어 타이머 |
 | `Heap_Monitor_Task` | `heap_monitor_task` | [App.c:191](main/App/App.c#L191) | 6 | — | 1024 / 4 KB | **주석 처리됨** ([App.c:292](main/App/App.c#L292)) |
 
@@ -262,30 +265,61 @@ SNMP 테이블과 웹 JSON은 전부 여기서 읽어간다.
 
 [경로 B] Modbus-RTU 마스터   (그 포트의 protocol == modbus_rtu 일 때, ISR 없음)
 
-  modbusMaster_task(&g_serial_port[p]) ─► modbus_read_values(port, slave)
+  modbusMaster_task(&g_serial_port[p]) ─► modbus_read_values(port, slave, v)
        ├─ serial_port_tx_enable/disable() 로 DE 를 감싸 요청 송신
        ├─ mb_recv(port, ...) ─► serial_port_getc() 로 응답 수신
-       └─ device_setValue(base + slave-1, 0=온도, 1=습도)
+       └─ device_bank_setValue(src, idx, c, v[c])   c = 0 .. DEVICE_VALUE_COLS-1
+
+[경로 C] 접점 입력   (시리얼과 무관, 보드가 DIN_COUNT 를 정의할 때만)
+
+  digitalInput_task() ─► digitalInput_poll()   200 ms 주기
+       └─ gpio_get(pin) ─► 값이 바뀐 입력만
+            device_bank_setValue(DEVICE_SRC_CONTACT, idx, 2, 1=정상 / 2=경보)
 ```
+
+**뱅크 행은 요청해서 받는다 — 직접 고르지 않는다.**
+
+```c
+int base = device_bank_reserve(개수, source);      /* 시작할 때 한 번 */
+device_bank_assign  (source, idx, "이름");          /* 이후로는 idx 로만 */
+device_bank_setValue(source, idx, col, value);
+int row = device_bank_row(source, idx);            /* 트랩용 행 번호가 필요할 때 */
+```
+
+`source` 는 시리얼 프로토콜이면 그 포트의 채널 번호, 아니면 `DEVICE_SRC_*` 값이다.
+같은 `source` 로 두 번 예약하면 블록이 이어 붙어서 `idx` 가 0부터 한 줄로 유지된다.
+
+> 예전에는 프로토콜마다 시작 행을 상수로 들고 있었고(`MODBUS_BANK_BASE_CH0/CH1`),
+> 범위가 겹치면 서로 값을 덮어쓰면서 아무 말도 남기지 않았다. 예약제로 바꾼 뒤로는
+> 겹칠 수가 없고, 새 프로토콜을 붙이는 사람이 남의 행 번호를 알 필요가 없다.
+> S/T/R 은 예약하지 않는다 — `S5=...` 처럼 명령이 행을 직접 지목하는 프로토콜이라
+> 설계상 뱅크 전체를 주소로 쓴다.
 
 | 포인트 | 사실 |
 |---|---|
 | 링 버퍼는 **포트마다 하나** | 두 포트 바이트가 섞이지 않는다 (`51f4a17`) |
 | R 명령 응답은 **명령이 온 포트로만** | `uart_tx_str(port, ...)` |
 | 포트 소유권 | `sensorUart_claim()` 이 그 포트의 `protocol` 을 보고 잡거나 비킨다 |
-| Modbus 뱅크 행 오프셋 | 채널 0 → 0번대, 채널 1 → 32번대 (`MODBUS_BANK_BASE_CH0/CH1`) |
+| 뱅크 행 배정 | `device_bank_reserve()` 가 **태스크가 시작한 순서대로** 나눠준다 |
 | Modbus 슬레이브 범위 | 1~4 고정 (`MODBUS_SLAVE_FIRST/LAST`) |
+| Modbus 가 읽는 레지스터 수 | `MODBUS_REG_COUNT` = `DEVICE_VALUE_COLS`. 컬럼을 늘리면 요청도 같이 늘어난다 |
 | 폴링 주기 | 슬레이브당 50 ms 간격 + 사이클당 1000 ms |
-| ⚠ 폴링 실패 시 | **뱅크에 옛 값이 그대로 남는다.** `last_update_ms` 는 기록되지만 읽는 쪽이 없다 |
+| ⚠ 폴링 실패 시 | **뱅크에 옛 값이 그대로 남는다.** 의도된 동작이다 — `device_assign()` 은 값을 지우지 않는다. 연결이 끊긴 장치는 0 을 보고하는 대신 마지막으로 말한 값을 계속 보여준다 |
+| ⚠ 신선도 | 값이 언제 갱신됐는지 읽는 쪽이 없다. 오래된 값과 방금 값이 화면에서 구분되지 않는다 |
 
 ### 2.3.2 device bank → SNMP
 
 ```
 snmp_agent_task()  (10 ms 주기)
+   ├─ snmp_limit_scan()       trap_scan_sec 마다 뱅크를 임계값과 대조 → 큐에 넣기
    ├─ snmp_flush_traps()      트랩 큐 배출 → snmp_custom_sendValueTrap()
    ├─ snmp_custom_refresh()   g_devices[] → snmpData[] 전량 복사
    └─ snmpd_run()             UDP 수신 → parseSNMPMessage() → 응답
 ```
+
+**언제 트랩을 쏠지는 SNMP 계층이 정한다.** 값을 쓰는 프로토콜은 관여하지 않는다 —
+뱅크에 쓰기만 하면 임계값 감시가 따라온다. 나중에 붙는 프로토콜도 이 파일의 존재를
+알 필요가 없다. 자세한 것은 [4.3.3](#433-트랩).
 
 | 항목 | 값 | 위치 |
 |---|---|---|
@@ -303,10 +337,31 @@ snmp_agent_task()  (10 ms 주기)
 | 엔드포인트 | 메서드 | 핸들러 | 내용 |
 |---|---|---|---|
 | `/` | GET | `handle_get_root` | `Web_page.h` 통째로 전송 (세션 필요) |
-| `/api/sensors` | GET | [`https_send_sensor_json`:303](port/app/platform_handler/src/httpHandler.c#L303) | device bank → JSON, **chunked 스트리밍** (RAM 에 전체를 안 만듦) |
+| `/api/sensors` | GET | `https_send_sensor_json` | device bank → JSON, **chunked 스트리밍** (RAM 에 전체를 안 만듦) |
 | `/api/config` | GET | [`https_send_config_json`:549](port/app/platform_handler/src/httpHandler.c#L549) | DevConfig → JSON (`body[1536]` 한 방에 조립) |
 | `/api/config` | POST | [`https_handle_config_post`:662](port/app/platform_handler/src/httpHandler.c#L662) | JSON 파싱 → DevConfig 갱신 → 저장 → GET 과 같은 JSON 응답 |
 | `/api/accounts*`, `/login`, `/setup`, `/logout`, `/api/reboot` | | [dispatch_request:1226](port/app/platform_handler/src/httpHandler.c#L1226) | 계정·세션·리부트 |
+
+`/api/sensors` 의 모양:
+
+```jsonc
+{
+  "columns": [ {"name":"Temperature","unit":"C","scale":-1}, ... ],   // g_value_columns[]
+  "ports":   [ {"ch":0,"if":"TTL/RS-232","proto":"Modbus RTU",
+                "baud":115200,"bits":8,"par":"N","stop":1,
+                "tx":4,"rx":5,"de":255}, ... ],                       // 포트당 한 개
+  "devices": [ {"index":1,"name":"TH-1","src":1,"values":[111,23,0]}, ... ],
+  "comm":    { "status":0, "recv_cs":0, "calc_cs":0, "check":0, "flag":0 }
+}
+```
+
+| 필드 | 쓰임 |
+|---|---|
+| `src` | 그 행을 발행한 주체. 시리얼 채널 번호이거나 `DEVICE_SRC_*`. **페이지가 이걸로 포트별 표를 나눈다** |
+| `ports` | 각 페이지 상단 띠. `serial_port_setup()` 이 실제로 잡은 값이라 HTML 에 사본을 두지 않는다 |
+| `ports[].bits` | 하드웨어가 실제로 내보내는 값. PL011 에 9비트 모드가 없어서 9 는 8 로 보고된다 |
+| `ports[].de` | RS-485 계열일 때만 핀 번호, 아니면 255. 모든 포트가 DE 를 해석해 갖고 있어서 그대로 내보내면 없는 선을 안내하게 된다 |
+| `index` | 1부터. **SNMP 셀 OID 의 행 번호와 같은 값이다** |
 
 ### 2.3.4 소켓 배정 ([common.h:25-47](port/app/configuration/inc/common.h#L25-L47))
 
@@ -364,7 +419,9 @@ offset      구역                                        비고
      │ serial_de_pin       ← uart1 DE GPIO       │
      │ snmp_community[16] / trap_community[16]   │
      │ snmp_perm / trap_disable                  │
-1545 │ reserved_ext[51]                          │  ← 남은 확장 예산
+     │ value_limit[4] (5 B ×4 = 20 B)            │  트랩 임계값, 값 컬럼별
+     │ trap_scan_sec / trap_repeat_sec           │
+1567 │ reserved_ext[29]                          │  ← 남은 확장 예산
 1596 └──────────────────────────────────────────┘
 ```
 
@@ -372,12 +429,24 @@ offset      구역                                        비고
 [ConfigData.h:210-217](port/app/configuration/inc/ConfigData.h#L210-L217) 의 주석이 그 계산을 그대로 적어둔 것이다.
 
 ```
-51 = 128 − 2(https_session_timeout_min) − 16(snmp_option 증설분) − 9(serial_option_485)
+29 = 128 − 2(https_session_timeout_min) − 16(snmp_option 증설분) − 9(serial_option_485)
          − 2(https_port) − 2(snmp_agent_port) − 8(web_access_ip)
          − 1(serial_intf_sel) − 1(serial485_intf_sel)
          − 1(serial485_de_pin) − 1(serial_de_pin)
          − 16(snmp_community) − 16(trap_community) − 1(snmp_perm) − 1(trap_disable)
+         − 20(value_limit) − 1(trap_scan_sec) − 1(trap_repeat_sec)
 ```
+
+**`ext_version` 을 올리지 않고 필드를 늘린 예가 위 세 줄이다.** 전부 "0 = 이 기능
+쓰기 전과 같은 동작" 이 되도록 골랐기 때문이다 — `use` 가 0 이면 감시하지 않고,
+주기가 0 이면 기본값을 쓴다. 기존 장비의 `reserved_ext` 는 이미 전부 0 이라,
+새 펌웨어를 올려도 마이그레이션이 돌지 않고 동작도 그대로다.
+버전을 올려야 하는 경우는 [5.2](#52-ext-필드를-추가할-때-reserved_ext-를-안-줄이면-기존-장비가-팩토리-리셋된다) 참고.
+
+> ⚠ **16비트 값을 `int16_t` 로 그냥 넣지 마라.** `DevConfig` 는 packed 라 멤버가
+> 홀수 오프셋에 앉을 수 있고, Cortex-M0+ 는 정렬 안 된 `LDRH` 에서 HardFault 한다.
+> `value_limit` 이 `uint8_t lo[2]` 로 되어 있고 `value_limit_get()/_set()` 을 거치는
+> 이유가 이것이다.
 
 ### 2.4.3 부팅 시 마이그레이션 판정
 
@@ -908,9 +977,21 @@ CFG_ADD(CFG_NUM("my_field", my_field, 0, 7, 0));
 CFG_ADD(CFG_NUM_Z("serial_de", serial_de_pin, 1, 29, DATA0_UART_RTS_PIN));
 ```
 
-> ⚠ **행을 추가하면 [`CFG_NUM_CNT`:471](port/app/platform_handler/src/httpHandler.c#L471) 도 같이 올려라.**
-> 안 올리면 넘친 행이 조용히 빠지고 `cfg_num_table: N rows, only M fit` 로그가 뜬다.
-> 배열 밖으로 쓰지는 않는다 ([`CFG_ADD`:484](port/app/platform_handler/src/httpHandler.c#L484) 가 막는다).
+**음수를 받는 필드**는 폭·부호·범위를 직접 적는 `CFG_RAW` 를 쓴다. `DevConfig` 멤버
+이름으로 가리킬 수 없는 것 — 배열 원소나 바이트 쌍의 한쪽 — 도 이쪽이다.
+
+```c
+/*        key          가리킬 곳                     폭 부호 zero_ok  min     max  def */
+CFG_ADD(CFG_RAW("lim0_lo", &conf->value_limit[0].lo[0], 2,  1,   0,  -32768, 32767, 0));
+```
+
+`CFG_NUM` 은 `sizeof` 로 폭을 채워주지만 `CFG_RAW` 는 손으로 적는 값이라 **필드와
+어긋날 수 있다.** 가리키는 필드 바로 옆에 두고, 꼭 필요할 때만 쓴다.
+
+> ⚠ **행을 추가하면 `CFG_NUM_CNT` 도 같이 올려라.**
+> 지금은 `18 + 3 × VALUE_LIMIT_CNT + 2` 로, 이름 붙은 18행 + 값 컬럼당 3행(사용/하한/상한)
+> + 트랩 주기 2행이다. 안 올리면 넘친 행이 조용히 빠지고
+> `cfg_num_table: N rows, only M fit` 로그가 뜬다. 배열 밖으로 쓰지는 않는다 — `CFG_ADD` 가 막는다.
 
 ### ④ 숫자가 아닌 값 — 손으로 붙인다
 
@@ -975,7 +1056,14 @@ if (parse_json_str(actual_body, "\"my_str\":", conf->my_str, sizeof(conf->my_str
 |---|---|---|
 | 1 | [sensor.h:32](port/app/platform_handler/inc/sensor.h#L32) | `DEVICE_VALUE_COLS` 를 3 → 4 |
 | 2 | [sensor.c:11-15](port/app/platform_handler/src/sensor.c#L11-L15) | `g_value_columns[]` 에 `{ "Pressure", "hPa", -1 }` 추가 (배열 길이 = `DEVICE_VALUE_COLS`) |
-| 3 | — | SNMP 테이블·웹 JSON·UART S/T/R 컬럼 수가 **자동으로** 따라온다 |
+| 3 | — | SNMP 테이블·웹 표·웹 임계값 행·S/T/R 컬럼 수가 **자동으로** 따라온다 |
+
+⚠ **하지만 자동으로 따라오지 않는 것이 둘 있다.**
+
+| 따라오는 것 | 어떻게 |
+|---|---|
+| **Modbus 요청 프레임** | `MODBUS_REG_COUNT` = `DEVICE_VALUE_COLS` 라서 **요청 수량이 3 → 4 로 바뀐다.** 응답 길이도 11 → 13 바이트. 레지스터가 3개뿐인 슬레이브는 그 순간부터 예외 응답을 보내고 폴링이 끊긴다. 센서가 못 따라오면 컬럼을 늘리지 말거나, 이 상수를 `DEVICE_VALUE_COLS` 에서 떼어내라 |
+| **임계값 저장 칸** | `VALUE_LIMIT_CNT` 는 4 로 고정이다(플래시 레이아웃 고정용). 컬럼이 그보다 많아지면 **넘는 컬럼은 감시되지 않는다** — 조용히. 늘리려면 `reserved_ext` 에서 5 B ×(추가분) 을 더 떼어내야 한다 ([4.1](#41-devconfig-ext-에-설정-필드-추가)) |
 
 제약:
 
@@ -983,6 +1071,8 @@ if (parse_json_str(actual_body, "\"my_str\":", conf->my_str, sizeof(conf->my_str
 |---|---|---|
 | `DEVICE_COUNT` ≤ 127 | 현재 64 | 셀 OID 서브식별자가 1바이트를 유지해야 함 |
 | `2 + DEVICE_VALUE_COLS` ≤ 127 | 현재 5 | 〃 |
+| `DEVICE_VALUE_COLS` ≤ 8 | 현재 3 | 임계값 감시 상태가 디바이스당 1바이트 비트마스크 (`s_limit_out[]`) |
+| `1 ≤ MODBUS_REG_COUNT ≤ 125` | 현재 3 | 요청 수량·응답 바이트 수가 각각 1바이트. `_Static_assert` 로 막아둠 |
 | `snmpData[]` 크기 | `7 + (2+COLS)×ROWS` | 컬럼 하나 늘 때마다 64 엔트리 증가 = **RAM 약 +5.6 KB** |
 
 > RAM 여유를 확인하라. 힙은 96 KB 이고 `snmpData[]` 는 정적(.bss) 이다.
@@ -1020,21 +1110,62 @@ Enterprise 번호(22210)가 박혀 있는 곳 — 바꾸려면 **전부** 고쳐
 
 > 22210 은 BER 3바이트(`81 AD 42`)로 인코딩된다. **다른 번호로 바꾸면 인코딩 길이가 달라져 `oidlen` 이 전부 틀어질 수 있다.**
 
-### 4.3.3 트랩 추가
+### 4.3.3 트랩
 
-기존 경로:
+**대부분의 경우 할 일이 없다.** 값을 뱅크에 쓰기만 하면 된다.
 
 ```
-  누군가 ──► snmp_notify_device(dev)      [어느 태스크에서든 안전, 큐에 넣기만]
-                    │  ring queue 32칸
-  snmp_agent_task ──► snmp_flush_traps()  ──► 컬럼마다 snmp_custom_sendValueTrap()
+[임계값 경로 — 기본]
+
+  아무 프로토콜 ──► device_bank_setValue()        SNMP 를 모른다
+                          │
+                     device bank
+                          │
+  snmp_agent_task ──► snmp_limit_scan()           trap_scan_sec 마다
+                          ├─ 컬럼별 상/하한과 대조
+                          └─ 방금 벗어난 칸만 ──► snmp_notify_cell(dev, col)
+                                                      │  ring queue 32칸
+                      snmp_flush_traps() ──► snmp_custom_sendValueTrap()
 ```
 
-| # | 할 일 | 위치 |
+임계값은 **값 컬럼마다 하나**다. 디바이스마다가 아니다 — 온도 컬럼에 상한을 걸면
+온도를 보고하는 모든 디바이스에 걸린다. 지금 것도, 내년에 붙는 것도.
+
+| 설정 | 저장 위치 | 뜻 |
 |---|---|---|
-| 1 | 트랩을 쏘고 싶은 지점에서 `snmp_notify_device(dev)` 호출 | 예: [sensorUart.c:214](port/app/platform_handler/src/sensorUart.c#L214) (T 명령) |
-| 2 | 새로운 종류의 트랩이면 `snmp_custom_sendValueTrap()` 을 본떠 함수 추가 | [snmp_custom.c:159](libraries/ioLibrary_Driver/Internet/SNMP/snmp_custom.c#L159) |
-| 3 | 트랩 목적지는 `snmp_option.trap_ip[4]`, 0.0.0.0 슬롯은 건너뜀 | [snmpHandler.c:107-111](port/app/platform_handler/src/snmpHandler.c#L107-L111) |
+| 하한 / 상한 | `value_limit[col].lo` / `.hi` | **원시 단위.** 웹이 `g_value_columns[].scale` 로 환산해서 보여준다 |
+| 사용 여부 | `value_limit[col].use` | `VALUE_LIMIT_USE_LO` / `_HI` 비트. 둘 다 0 이면 그 컬럼은 감시 안 함 |
+| 검사 주기 | `trap_scan_sec` | 뱅크를 훑는 간격(초). 0 이면 `TRAP_SCAN_SEC_DEFAULT` |
+| 재알림 | `trap_repeat_sec` | 계속 벗어나 있을 때 다시 알리는 간격(초). **0 이면 벗어나는 순간 한 번만** |
+
+동작 규칙:
+
+| | |
+|---|---|
+| 벗어나는 순간 | 그 칸 하나에 트랩 1발 |
+| 계속 벗어나 있으면 | `trap_repeat_sec` 마다 다시. 0 이면 안 보냄 |
+| **정상 복귀** | **조용하다.** 복귀 트랩은 없다 — 비트만 지워서 다음 크로싱에 대비한다 |
+| 감시 상태 | `s_limit_out[]` 에 디바이스당 1바이트, 컬럼당 1비트 |
+
+> 아날로그 값에 `trap_repeat_sec` 를 짧게 두면 트랩이 쏟아진다. 큐는 32칸이고
+> 넘치면 조용히 버린다. 온도처럼 계속 흔들리는 값이면 수십 초 단위로 잡아라.
+
+#### 직접 쏘고 싶을 때
+
+임계값과 무관하게 "지금 이 일이 일어났다" 를 알려야 하는 프로토콜만 쓴다.
+트리에서는 S/T/R 의 `T` 명령 하나뿐이다 — 상대가 알려준 사건이라 스윕이 알아채기를
+기다리면 알려준 의미가 없어진다.
+
+```c
+snmp_notify_cell(dev, col);   /* 값 하나 */
+snmp_notify_device(dev);      /* 그 디바이스의 모든 값 컬럼 */
+```
+
+둘 다 큐에 넣기만 하므로 **어느 태스크에서 불러도 안전하다.**
+
+#### 새로운 종류의 트랩
+
+값 셀이 아닌 것을 알려야 하면 [`snmp_custom_sendValueTrap()`](libraries/ioLibrary_Driver/Internet/SNMP/snmp_custom.c#L159) 을 본떠 함수를 만든다.
 
 주의:
 
@@ -1042,6 +1173,8 @@ Enterprise 번호(22210)가 박혀 있는 곳 — 바꾸려면 **전부** 고쳐
 |---|---|
 | ☐ | 트랩 송신은 **`snmp_agent_task` 안에서만** — 트랩 소켓(소켓 0)을 공유하므로 |
 | ☐ | 큐가 꽉 차면 조용히 버린다 (32칸) |
+| ☐ | 큐는 **셀 단위**다. 디바이스 단위였을 때는 접점 하나가 바뀌어도 컬럼 수만큼 나갔다 |
+| ☐ | 트랩 목적지는 `snmp_option.trap_ip[4]`, `0.0.0.0` 슬롯은 건너뜀 |
 | ☐ | `trap_disable` 이 1 이면 큐만 비우고 안 보낸다 |
 | ☐ | 트랩 community 는 `snmp_get_trap_community()` 로 얻는다 (에이전트 community 와 별개) |
 
@@ -1140,23 +1273,26 @@ void myproto_init(SerialPort *port) {
 
 void myproto_task(void *argument) {
     SerialPort *port = (SerialPort *)argument;
-    int base;
+    uint8_t src;
 
     if (port == NULL) {
         vTaskDelete(NULL);
         return;
     }
 
-    /*  행을 고르지 말고 받아라.
-        다른 프로토콜이 뭘 썼는지 몰라도 겹치지 않는다. */
-    base = device_bank_reserve(MYPROTO_DEVICE_CNT);
-    if (base < 0) {
+    /*  행을 고르지 말고 받아라. 다른 프로토콜이 뭘 썼는지 몰라도 겹치지 않는다.
+        src 는 "누가 발행하는가" — 시리얼 프로토콜이면 그 포트의 채널 번호다.
+        웹이 이 값으로 포트별 표를 나눈다. */
+    src = (uint8_t)port->channel;
+    if (device_bank_reserve(MYPROTO_DEVICE_CNT, src) < 0) {
         vTaskDelete(NULL);              /* bank 에 자리가 없다 */
         return;
     }
 
     myproto_init(port);
-    device_assign((uint8_t)base, "UPS-1");   /* 응답 전에도 화면에 보이도록 */
+
+    /*  받은 블록 안의 순번으로만 쓴다. 행 번호는 뱅크가 기억한다. */
+    device_bank_assign(src, 0, "UPS-1");     /* 응답 전에도 화면에 보이도록 */
 
     while (1) {
         /*  커맨드 모드가 그 포트를 가져간 동안은 폴링을 멈춘다. 안 그러면
@@ -1173,8 +1309,20 @@ void myproto_task(void *argument) {
         serial_port_puts(port, req, sizeof(req));
 
         /* 2) 응답 수신 — 반드시 serial_port_getc() 로 (AT 이스케이프 감시) */
-        /* 3) 파싱 → device_setValue(base, col, value);
-              변화를 알릴 거면 snmp_notify_device(base); */
+
+        /*  3) 파싱 → 뱅크에 쓴다. 여기서 끝이다.
+
+            컬럼을 하나도 빼지 마라. 안 쓴 컬럼은 이전 값이 그대로 남고, 웹은
+            그걸 "값 없음" 이 아니라 측정값으로 그린다.
+
+                for (uint8_t c = 0; c < DEVICE_VALUE_COLS; c++) {
+                    device_bank_setValue(src, 0, c, value_from(rsp, c));
+                }
+
+            트랩은 신경 쓰지 않아도 된다. SNMP 에이전트가 뱅크를 임계값과
+            대조해서 알아서 쏜다 ([4.3.3](#433-트랩)). 임계값과 무관하게
+            "지금 이 일이 일어났다" 를 알려야 할 때만 snmp_notify_cell() 을
+            직접 부른다. */
 
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
@@ -1703,8 +1851,13 @@ cd ../..
 | `sizeof(DevConfig)` | 1596 | 계산값 |
 | `DEVCONFIG_EXT_MAGIC` | `0x57495A45` ('WIZE') | [ConfigData.h:200](port/app/configuration/inc/ConfigData.h#L200) |
 | `DEVCONFIG_EXT_VERSION` | 5 | [ConfigData.h:208](port/app/configuration/inc/ConfigData.h#L208) |
-| `DEVCONFIG_RESERVED_EXT_SIZE` | 51 | [ConfigData.h:217](port/app/configuration/inc/ConfigData.h#L217) |
+| `DEVCONFIG_RESERVED_EXT_SIZE` | 29 | [ConfigData.h](port/app/configuration/inc/ConfigData.h) |
 | `DEVICE_COUNT` / `DEVICE_VALUE_COLS` | 64 / 3 | [sensor.h:31-32](port/app/platform_handler/inc/sensor.h#L31-L32) |
+| `VALUE_LIMIT_CNT` | 4 | [ConfigData.h](port/app/configuration/inc/ConfigData.h) — 임계값을 담을 수 있는 컬럼 수 |
+| `TRAP_SCAN_SEC_DEFAULT` | 5 | 〃 — `trap_scan_sec` 가 0 일 때 |
+| `MODBUS_REG_COUNT` | `DEVICE_VALUE_COLS` (3) | [modbusMaster.h](port/app/platform_handler/inc/modbusMaster.h) |
+| `SNMP_TRAP_QUEUE_LEN` | 32 | [snmpHandler.c](port/app/platform_handler/src/snmpHandler.c) — 셀 단위 |
+| `DIN_COUNT` | 16 | [WIZnet_board.h](port/app/board/inc/WIZnet_board.h) — 이 보드만 정의 |
 | `MAX_OID` / `MAX_STRING` | 12 / 64 | [snmp.h:17-18](libraries/ioLibrary_Driver/Internet/SNMP/snmp.h#L17-L18) |
 | `SEG_DATA_BUF_SIZE` | 4096 | [seg.h:18](port/app/serial_to_ethernet/inc/seg.h#L18) |
 | `configTOTAL_HEAP_SIZE` | 96 KB | [FreeRTOSConfig.h:75](port/app/FreeRTOS-Kernel/inc/FreeRTOSConfig.h#L75) |

@@ -526,22 +526,33 @@ typedef struct {
     const char *key;        /* JSON key, without the quotes                 */
     uint8_t     width;      /* sizeof the field: 1 or 2, filled by sizeof   */
     uint8_t     zero_ok;    /* POST also takes 0, meaning "back to default" */
+    uint8_t     is_signed;  /* a 2-byte field holding an int16_t            */
     void       *field;
-    uint16_t    min, max;   /* the valid range, in both directions          */
-    uint16_t    def;        /* what the GET shows when the stored value is
+    int32_t     min, max;   /* the valid range, in both directions          */
+    int32_t     def;        /* what the GET reports when the stored value is
                                outside that range                           */
 } CfgNum;
 
 #define CFG_NUM(key, f, mn, mx, dv) \
-    { key, (uint8_t)sizeof(((DevConfig *)0)->f), 0, &conf->f, mn, mx, dv }
+    { key, (uint8_t)sizeof(((DevConfig *)0)->f), 0, 0, &conf->f, mn, mx, dv }
 
 /*  Same, for a field where 0 is the stored "unset" sentinel: the POST takes it
     so the setting can be put back to the board default, and the GET shows the
     default rather than the 0. */
 #define CFG_NUM_Z(key, f, mn, mx, dv) \
-    { key, (uint8_t)sizeof(((DevConfig *)0)->f), 1, &conf->f, mn, mx, dv }
+    { key, (uint8_t)sizeof(((DevConfig *)0)->f), 1, 0, &conf->f, mn, mx, dv }
 
-#define CFG_NUM_CNT  18
+/*  A row pointing at something sizeof(((DevConfig *)0)->f) cannot name -- an
+    array element, or one half of a byte pair. Width, sign and range are given
+    outright, so this one CAN disagree with the field it points at; the two
+    callers below are the whole set, and both are two lines from their field. */
+#define CFG_RAW(key, ptr, w, sgn, zok, mn, mx, dv) \
+    { key, (uint8_t)(w), (uint8_t)(zok), (uint8_t)(sgn), (void *)(ptr), mn, mx, dv }
+
+/*  18 named rows, plus three per value column (use / low / high) and the two
+    trap periods. Sized on VALUE_LIMIT_CNT rather than DEVICE_VALUE_COLS so the
+    array still fits if the column list grows to what the config can hold. */
+#define CFG_NUM_CNT  (18 + 3 * VALUE_LIMIT_CNT + 2)
 
 /*  Filled per call rather than declared const: &conf->x is not a constant
     expression, and serial_mode's upper bound comes from the protocol registry
@@ -587,6 +598,37 @@ static int cfg_num_table(DevConfig *conf, CfgNum *t, int cap) {
     CFG_ADD(CFG_NUM  ("serial485_flow",   serial_option_485.flow_control, 0, 4,  0));
     CFG_ADD(CFG_NUM  ("serial485_mode",   serial_option_485.protocol,     0, proto_max, 0));
 
+    /*  Trap thresholds, one set per value column.
+
+        Spelled out rather than built with snprintf because a row keeps the
+        pointer it is given, not a copy, and a key composed into a local buffer
+        would be freed before the GET or the POST ever reads it. */
+    static const char *const LIM_USE[VALUE_LIMIT_CNT] = {
+        "lim0_use", "lim1_use", "lim2_use", "lim3_use"
+    };
+    static const char *const LIM_LO[VALUE_LIMIT_CNT] = {
+        "lim0_lo",  "lim1_lo",  "lim2_lo",  "lim3_lo"
+    };
+    static const char *const LIM_HI[VALUE_LIMIT_CNT] = {
+        "lim0_hi",  "lim1_hi",  "lim2_hi",  "lim3_hi"
+    };
+
+    for (uint8_t c = 0; c < DEVICE_VALUE_COLS && c < VALUE_LIMIT_CNT; c++) {
+        CFG_ADD(CFG_RAW(LIM_USE[c], &conf->value_limit[c].use,   1, 0, 0,
+                        0, VALUE_LIMIT_USE_LO | VALUE_LIMIT_USE_HI, 0));
+        /*  Raw units, signed: the page scales them to what the table shows.
+            -32768..32767 is the whole of an int16_t, so no reading a sensor
+            can produce is out of reach of a limit. */
+        CFG_ADD(CFG_RAW(LIM_LO[c],  &conf->value_limit[c].lo[0], 2, 1, 0,
+                        -32768, 32767, 0));
+        CFG_ADD(CFG_RAW(LIM_HI[c],  &conf->value_limit[c].hi[0], 2, 1, 0,
+                        -32768, 32767, 0));
+    }
+
+    CFG_ADD(CFG_NUM_Z("trap_scan",   trap_scan_sec,   1, TRAP_SCAN_SEC_MAX,
+                      TRAP_SCAN_SEC_DEFAULT));
+    CFG_ADD(CFG_NUM  ("trap_repeat", trap_repeat_sec, 0, TRAP_REPEAT_SEC_MAX, 0));
+
 #undef CFG_ADD
 
     if (i > cap) {
@@ -603,19 +645,29 @@ static int cfg_num_table(DevConfig *conf, CfgNum *t, int cap) {
     writing one through a uint16_t * emits a 16-bit LDRH/STRH, which HardFaults
     on Cortex-M0+ when the address is odd. Taking the address as void * and
     splitting it here keeps every access byte-wide, which is always aligned. */
-static uint16_t cfg_num_get(const CfgNum *e) {
+static int32_t cfg_num_get(const CfgNum *e) {
     const uint8_t *p = (const uint8_t *)e->field;
-    uint16_t v = (e->width == 1) ? p[0] : (uint16_t)(p[0] | (p[1] << 8));
+    int32_t v;
 
+    if (e->width == 1) {
+        v = p[0];
+    } else {
+        uint16_t raw = (uint16_t)(p[0] | (p[1] << 8));
+        /*  Sign-extend through int16_t rather than by hand: a low limit of
+            -10.0 C is stored as -100, and reading that back as 65436 would put
+            it outside the row's range and silently reset it to the default. */
+        v = e->is_signed ? (int32_t)(int16_t)raw : (int32_t)raw;
+    }
     return (v < e->min || v > e->max) ? e->def : v;
 }
 
-static void cfg_num_set(const CfgNum *e, uint16_t v) {
+static void cfg_num_set(const CfgNum *e, int32_t v) {
     uint8_t *p = (uint8_t *)e->field;
+    uint32_t u = (uint32_t)v;
 
-    p[0] = (uint8_t)v;
+    p[0] = (uint8_t)(u & 0xFFu);
     if (e->width == 2) {
-        p[1] = (uint8_t)(v >> 8);
+        p[1] = (uint8_t)((u >> 8) & 0xFFu);
     }
 }
 
@@ -680,7 +732,7 @@ static int https_send_config_json(wiz_tls_context *tls_ctx) {
         pin as the pin this board routes. */
     for (int i = 0; i < nnum; i++) {
         json_appendf(body, sizeof(body), &n,
-                     "\"%s\":%u,", nums[i].key, (unsigned int)cfg_num_get(&nums[i]));
+                     "\"%s\":%ld,", nums[i].key, (long)cfg_num_get(&nums[i]));
     }
     /*  The Mode dropdown is built from this, so the page never carries its own
         copy of the protocol list. */
@@ -869,13 +921,15 @@ static int https_handle_config_post(wiz_tls_context *tls_ctx, const char *body) 
                     continue;
                 }
                 sp += strlen(key);
-                unsigned int v = 0;
-                if (sscanf(sp, "%u", &v) != 1) {
+                int v = 0;
+                /*  %d, not %u: the limits can be negative, and %u on "-100"
+                    wraps it to 4294967196 rather than failing the range test. */
+                if (sscanf(sp, "%d", &v) != 1) {
                     continue;
                 }
                 if ((v >= nums[i].min && v <= nums[i].max) ||
                         (v == 0 && nums[i].zero_ok)) {
-                    cfg_num_set(&nums[i], (uint16_t)v);
+                    cfg_num_set(&nums[i], (int32_t)v);
                     changed = 1;
                 }
             }

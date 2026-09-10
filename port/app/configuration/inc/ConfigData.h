@@ -197,6 +197,57 @@ struct __snmp_option {
     uint8_t trap_ip[SNMP_TRAP_IP_CNT][4];
 } __attribute__((packed));
 
+/*  ── Trap thresholds ──────────────────────────────────────────────────────
+    One rule per device-bank value column. The columns are the schema every
+    layer follows -- the web table, the SNMP table, the OIDs -- while the
+    devices behind them come and go, so a limit set on the temperature column
+    covers every device that reports one, today's and next year's.
+
+    Limits are stored as byte pairs rather than int16_t on purpose. DevConfig
+    is packed, so a 16-bit member lands wherever the fields before it leave
+    it, and an odd offset makes the compiler emit an unaligned LDRH that
+    HardFaults on Cortex-M0+. value_limit_get()/_set() move them a byte at a
+    time, which is aligned by construction.
+
+    VALUE_LIMIT_CNT is its own constant rather than DEVICE_VALUE_COLS: the
+    flash layout has to stay put when the column list changes, so there is
+    room for a few and the first DEVICE_VALUE_COLS of them are the ones in
+    use. Raising DEVICE_VALUE_COLS past this leaves the extra columns
+    unwatched rather than moving every field after it.
+
+    All-zero -- which is what an existing unit's reserved_ext already holds --
+    means every limit off, so this needs no ext_version bump and no re-init. */
+#define VALUE_LIMIT_CNT         4
+
+#define VALUE_LIMIT_USE_LO      0x01   /* watch the low limit  */
+#define VALUE_LIMIT_USE_HI      0x02   /* watch the high limit */
+
+struct __value_limit {
+    uint8_t lo[2];      /* low limit,  raw units, little-endian */
+    uint8_t hi[2];      /* high limit, raw units, little-endian */
+    uint8_t use;        /* VALUE_LIMIT_USE_* bits; 0 => column not watched */
+} __attribute__((packed));
+
+/*  How often the agent sweeps the bank against the limits, and how long a cell
+    has to stay outside one before it is reported again.
+
+    trap_repeat_sec 0 means report the crossing once and stay quiet until the
+    value comes back inside -- there is no recovery trap, so a manager that
+    misses that one notification learns nothing more until the next crossing.
+    Set it to a few seconds if that matters more than the traffic does. */
+#define TRAP_SCAN_SEC_DEFAULT   5
+#define TRAP_SCAN_SEC_MAX       250
+#define TRAP_REPEAT_SEC_MAX     250
+
+static inline int16_t value_limit_get(const uint8_t p[2]) {
+    return (int16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
+}
+
+static inline void value_limit_set(uint8_t p[2], int16_t v) {
+    p[0] = (uint8_t)((uint16_t)v & 0xFFu);
+    p[1] = (uint8_t)(((uint16_t)v >> 8) & 0xFFu);
+}
+
 #define DEVCONFIG_EXT_MAGIC      0x57495A45UL  /* 'WIZE' (LE: 45 5A 49 57) */
 /*  ext_version history:
       2: allowed_ip/trap_ip slots 2->4 (struct __snmp_option grew 16B)
@@ -209,12 +260,14 @@ struct __snmp_option {
 #define DEVCONFIG_RESERVED_LEGACY_SIZE  64
 /*  reserved_ext shrinks as named ext fields are added, keeping sizeof(DevConfig)
     constant so existing flash blobs stay layout-compatible.
-    51 = 128 - https_session_timeout_min(2) - snmp_option slot growth(16)
+    29 = 128 - https_session_timeout_min(2) - snmp_option slot growth(16)
              - sizeof(struct __serial_option)(9) - https_port(2) - snmp_agent_port(2)
              - web_access_ip(8) - serial_intf_sel(1) - serial485_intf_sel(1)
              - serial485_de_pin(1) - serial_de_pin(1) - snmp_community(16)
-             - trap_community(16) - snmp_perm(1) - trap_disable(1). */
-#define DEVCONFIG_RESERVED_EXT_SIZE    51
+             - trap_community(16) - snmp_perm(1) - trap_disable(1)
+             - value_limit(5 x VALUE_LIMIT_CNT = 20) - trap_scan_sec(1)
+             - trap_repeat_sec(1). */
+#define DEVCONFIG_RESERVED_EXT_SIZE    29
 
 /* Service port defaults / bounds (0 stored => use default at runtime). */
 #define HTTPS_PORT_DEFAULT        443
@@ -284,6 +337,14 @@ typedef struct __DevConfig {
     char     trap_community[SNMP_COMMUNITY_SIZE];   /* trap community;    "" => public */
     uint8_t  snmp_perm;        /* enum snmp_perm: 0 R/W, 1 R/O, 2 no-access */
     uint8_t  trap_disable;     /* 0 = traps enabled (default), 1 = disabled */
+    /*  ── Trap thresholds ──
+        Same zero-is-the-old-behaviour rule as the four above: every `use` byte
+        clear means nothing is watched, and a zero period falls back to
+        TRAP_SCAN_SEC_DEFAULT, so a unit upgraded into this firmware behaves
+        exactly as it did before anyone opens the web page. */
+    struct __value_limit value_limit[VALUE_LIMIT_CNT];
+    uint8_t  trap_scan_sec;    /* bank sweep period, s; 0 => TRAP_SCAN_SEC_DEFAULT */
+    uint8_t  trap_repeat_sec;  /* re-report while still outside; 0 => once per crossing */
     uint8_t reserved_ext[DEVCONFIG_RESERVED_EXT_SIZE];
 } __attribute__((packed)) DevConfig;
 

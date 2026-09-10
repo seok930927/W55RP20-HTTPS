@@ -176,6 +176,46 @@ th {
     color: #9aa7b1;
     padding: 0 6px;
 }
+/* threshold row inside the device table */
+.sensor-table .lim-row td,
+.sensor-table .lim-row th {
+    background: #f2f6fa;
+    border-top: 1px solid #9aa7b1;
+    border-bottom: 1px solid #9aa7b1;
+}
+.sensor-table .lim-row th {
+    color: #1a3a5c;
+    font-weight: bold;
+}
+.lim-in {
+    width: 52px;
+    font-size: 11px;
+    text-align: right;
+    padding: 1px 3px;
+}
+.lim-row label {
+    color: #33475b;
+    font-size: 11px;
+    white-space: nowrap;
+}
+.lim-ctl {
+    margin: 0 8px 8px;
+    padding: 6px 8px;
+    background: #f7f7f7;
+    border: 1px solid #c8c8c8;
+    font-size: 11px;
+    color: #33475b;
+}
+.lim-ctl input {
+    width: 44px;
+    font-size: 11px;
+    text-align: right;
+    padding: 1px 3px;
+}
+.lim-ctl .lim-msg {
+    margin-left: 10px;
+    color: #0a7a0a;
+}
 /* the OID column number, parked under a value column heading */
 .sensor-table .oid-col {
     display: block;
@@ -375,9 +415,17 @@ th {
                     <div class="section-title">활성 디바이스</div>
                     <table class="sensor-table">
                         <thead id="sensor-head"></thead>
+                        <tbody id="lim-rows"></tbody>
                         <tbody id="sensor-rows"></tbody>
                     </table>
                     <div id="sensor-empty" style="text-align:center;padding:20px;color:#888;display:none">활성 항목이 없습니다</div>
+                    <div class="lim-ctl">
+                        검사 주기 <input id="trap-scan" maxlength="3"> 초
+                        &nbsp;&nbsp; 재알림 <input id="trap-repeat" maxlength="3"> 초
+                        <span style="color:#888">(0 = 벗어날 때 한 번만)</span>
+                        <button class="btn-save" style="margin-left:10px" onclick="saveLimits('')">임계값 저장</button>
+                        <span class="lim-msg" id="lim-msg"></span>
+                    </div>
                 </section>
                 <section class="section" id="din-section">
                     <div class="section-title">센서 상태 ( 1 : 정상, 2 : 경보 )
@@ -405,9 +453,17 @@ th {
                     <div class="section-title">활성 디바이스</div>
                     <table class="sensor-table">
                         <thead id="sensor-head2"></thead>
+                        <tbody id="lim-rows2"></tbody>
                         <tbody id="sensor-rows2"></tbody>
                     </table>
                     <div id="sensor-empty2" style="text-align:center;padding:20px;color:#888;display:none">활성 항목이 없습니다</div>
+                    <div class="lim-ctl">
+                        검사 주기 <input id="trap-scan2" maxlength="3"> 초
+                        &nbsp;&nbsp; 재알림 <input id="trap-repeat2" maxlength="3"> 초
+                        <span style="color:#888">(0 = 벗어날 때 한 번만)</span>
+                        <button class="btn-save" style="margin-left:10px" onclick="saveLimits('2')">임계값 저장</button>
+                        <span class="lim-msg" id="lim-msg2"></span>
+                    </div>
                 </section>
                 <section class="section" id="din-section2">
                     <div class="section-title">센서 상태 ( 1 : 정상, 2 : 경보 )
@@ -895,6 +951,124 @@ function updDinBlock(sfx, list){
     wrap.innerHTML=html;
 }
 
+/*  ── Trap thresholds ───────────────────────────────────────────────────
+    Set per value column, because that is what they mean: one rule on the
+    temperature column covers every device that reports a temperature. The
+    device decides when a reading has crossed one and sends the trap itself --
+    nothing on this page watches values.
+
+    Entered in the units the table shows and stored raw, using the same scale
+    fmtValue() displays with, so 28.0 on screen and 280 in the config are the
+    same number said twice. */
+function limToInput(raw, col){
+    var scaled = raw * Math.pow(10, col.scale);
+    return scaled.toFixed(col.scale < 0 ? -col.scale : 0);
+}
+function limFromInput(txt, col){
+    var v = parseFloat(txt);
+    if(!isFinite(v)) return 0;
+    return Math.round(v / Math.pow(10, col.scale));
+}
+
+var LIM_USE_LO = 1, LIM_USE_HI = 2;
+
+/*  The row is built once and then only its values are refilled. It sits in a
+    tbody of its own so updTable(), which rewrites the header and the readings
+    every poll, never touches a field somebody is typing into. */
+function limBuild(sfx, cols){
+    var body = document.getElementById('lim-rows'+sfx);
+    if(!body || body.innerHTML !== '') return;
+
+    var html = '<tr class="lim-row"><th colspan="2">임계값</th>';
+    for(var c=0; c<cols.length; c++){
+        html += '<td>'
+             +  '<label><input type="checkbox" id="limloen'+c+sfx+'"> 하한</label> '
+             +  '<input class="lim-in" id="limlo'+c+sfx+'"> &nbsp; '
+             +  '<label><input type="checkbox" id="limhien'+c+sfx+'"> 상한</label> '
+             +  '<input class="lim-in" id="limhi'+c+sfx+'">'
+             +  '</td>';
+    }
+    body.innerHTML = html + '</tr>';
+}
+
+/*  Fill both pages from the stored configuration. Called once the columns are
+    known and again after a save, so the fields always show what the device
+    actually holds rather than what was typed at it. */
+function limLoad(cols){
+    fetch('/api/config').then(function(r){
+        if(authRedirect(r)) return null;
+        return r.json();
+    }).then(function(d){
+        if(!d) return;
+        for(var s=0; s<DIN_SUFFIX.length; s++){
+            var sfx = DIN_SUFFIX[s];
+            var sc = document.getElementById('trap-scan'+sfx);
+            var rp = document.getElementById('trap-repeat'+sfx);
+            if(sc && d.trap_scan!=null)   sc.value = d.trap_scan;
+            if(rp && d.trap_repeat!=null) rp.value = d.trap_repeat;
+
+            for(var c=0; c<cols.length; c++){
+                var use = d['lim'+c+'_use'];
+                var lo  = document.getElementById('limlo'+c+sfx);
+                var hi  = document.getElementById('limhi'+c+sfx);
+                var le  = document.getElementById('limloen'+c+sfx);
+                var he  = document.getElementById('limhien'+c+sfx);
+                if(!lo || !hi || !le || !he || use==null) continue;
+                le.checked = (use & LIM_USE_LO) !== 0;
+                he.checked = (use & LIM_USE_HI) !== 0;
+                if(d['lim'+c+'_lo']!=null) lo.value = limToInput(d['lim'+c+'_lo'], cols[c]);
+                if(d['lim'+c+'_hi']!=null) hi.value = limToInput(d['lim'+c+'_hi'], cols[c]);
+            }
+        }
+    }).catch(function(){});
+}
+
+/*  Save only the threshold keys. The device leaves every setting the body does
+    not mention alone, so this cannot disturb the network or serial pages. */
+function saveLimits(sfx){
+    var cols = LIM_COLS;
+    var msg  = document.getElementById('lim-msg'+sfx);
+    var vals = {};
+
+    if(!cols || !cols.length) return;
+
+    for(var c=0; c<cols.length; c++){
+        var le = document.getElementById('limloen'+c+sfx);
+        var he = document.getElementById('limhien'+c+sfx);
+        var lo = document.getElementById('limlo'+c+sfx);
+        var hi = document.getElementById('limhi'+c+sfx);
+        if(!le || !he || !lo || !hi) continue;
+        vals['lim'+c+'_use'] = (le.checked ? LIM_USE_LO : 0) | (he.checked ? LIM_USE_HI : 0);
+        vals['lim'+c+'_lo']  = limFromInput(lo.value, cols[c]);
+        vals['lim'+c+'_hi']  = limFromInput(hi.value, cols[c]);
+    }
+    var sc = parseInt((document.getElementById('trap-scan'+sfx)||{}).value, 10);
+    var rp = parseInt((document.getElementById('trap-repeat'+sfx)||{}).value, 10);
+    if(isFinite(sc)) vals.trap_scan   = sc;
+    if(isFinite(rp)) vals.trap_repeat = rp;
+
+    if(msg){ msg.style.color='#0f5b87'; msg.textContent='저장 중...'; }
+    fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(vals)
+    }).then(function(r){
+        if(authRedirect(r)) return null;
+        return r.json();
+    }).then(function(d){
+        if(msg){
+            if(d && d.ok===false){ msg.style.color='red'; msg.textContent='오류'; }
+            else { msg.style.color='#0a7a0a'; msg.textContent='저장 완료 (즉시 적용)'; }
+            setTimeout(function(){ msg.textContent=''; }, 3000);
+        }
+        limLoad(LIM_COLS);
+    }).catch(function(){
+        if(msg){ msg.style.color='red'; msg.textContent='오류 발생'; }
+    });
+}
+
+/*  The columns the threshold row was built from, kept so a save can scale its
+    inputs back without waiting on another /api/sensors reply. */
+var LIM_COLS = null;
+
 /*  Which port a page shows. The device says where it came from in "src": a
     serial protocol stamps its port channel, anything else a DEVICE_SRC_*
     value, so the page never needs its own copy of the bank layout. */
@@ -990,6 +1164,14 @@ function upd(d){
     updTable('',  cols, byPort[VIEW_SRC['sensor']]  || []);
     updTable('2', cols, byPort[VIEW_SRC['sensor2']] || []);
     updDin(din);
+
+    /*  The threshold row needs the column list, which only arrives with the
+        readings. Built on the first reply that carries one, then left alone. */
+    if(cols.length && !LIM_COLS){
+        LIM_COLS = cols;
+        for(var s=0; s<DIN_SUFFIX.length; s++) limBuild(DIN_SUFFIX[s], cols);
+        limLoad(cols);
+    }
 
     var ports = d.ports || [];
     updPortInfo('',  VIEW_SRC['sensor'],
