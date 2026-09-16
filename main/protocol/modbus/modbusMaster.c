@@ -35,7 +35,7 @@ extern uint32_t baud_table[];
 #define MODBUS_POLL_PERIOD   1000   /* ms between full poll cycles               */
 
 /*  The request carries the register quantity in a byte and the reply its byte
-    count in a byte, and mb_recv() fills a fixed buffer -- so the column count
+    count in a byte, and the reply goes into a fixed buffer -- so the column count
     has to stay inside what both can say. */
 _Static_assert(MODBUS_REG_COUNT >= 1 && MODBUS_REG_COUNT <= 125,
                "DEVICE_VALUE_COLS must be 1..125 for the Modbus master");
@@ -72,26 +72,6 @@ static const char *hexdump(char *buf, size_t cap, const uint8_t *p, int len) {
     return buf;
 }
 
-/* Read up to `want` bytes within `timeout_ms`. Returns the number received. */
-static int mb_recv(SerialPort *port, uint8_t *buf, int want, uint32_t timeout_ms) {
-    TickType_t start = xTaskGetTickCount();
-    int got = 0;
-    while (got < want) {
-        int32_t ch;
-        while (got < want && (ch = serial_port_getc(port)) != RET_NOK) {
-            buf[got++] = (uint8_t)ch;
-        }
-        if (got >= want) {
-            break;
-        }
-        if ((xTaskGetTickCount() - start) >= pdMS_TO_TICKS(timeout_ms)) {
-            break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(2));   /* FIFO (32B) buffers while we yield */
-    }
-    return got;
-}
-
 int modbus_read_values(SerialPort *port, uint8_t slave, int16_t *out) {
     /*  Request: read MODBUS_REG_COUNT input registers (Func 04) from address
         0x0000. The quantity is 16-bit on the wire; the static assert above
@@ -110,7 +90,9 @@ int modbus_read_values(SerialPort *port, uint8_t slave, int16_t *out) {
     serial_port_puts(port, req, sizeof(req));
 
     uint8_t rsp[MODBUS_RSP_LEN];
-    int n = mb_recv(port, rsp, MODBUS_RSP_LEN, MODBUS_RSP_TIMEOUT);
+    /*  The reply length is known because we chose the request, which is the
+        one framing a master never has to hunt for. */
+    int n = serial_port_read_exact(port, rsp, MODBUS_RSP_LEN, MODBUS_RSP_TIMEOUT);
     char txs[3 * sizeof(req) + 1];
     char rxs[3 * MODBUS_RSP_LEN + 1];
 

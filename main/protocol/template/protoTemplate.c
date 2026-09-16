@@ -41,30 +41,25 @@ void protoTemplate_init(SerialPort *port) {
              port->channel, port->de_pin);
 }
 
-/*  Read a response into `buf`, up to `want` bytes or until `timeout_ms`.
-    Returns how many bytes arrived. */
-static int proto_recv(SerialPort *port, uint8_t *buf, int want, uint32_t timeout_ms) {
-    TickType_t start = xTaskGetTickCount();
-    int got = 0;
+/*  ── Receiving ─────────────────────────────────────────────────────────
+    The driver frames for you. Pick the one that matches your protocol; all of
+    them read through serial_port_getc(), so the +++ escape on the config port
+    keeps working whichever you use.
 
-    while (got < want) {
-        int32_t ch;
-        /*  serial_port_getc() also watches for the +++ escape on the config
-            port. Reading with uart_getc() instead would leave this port unable
-            to reach command mode. */
-        while (got < want && (ch = serial_port_getc(port)) != RET_NOK) {
-            buf[got++] = (uint8_t)ch;
-        }
-        if (got >= want) {
-            break;
-        }
-        if ((xTaskGetTickCount() - start) >= pdMS_TO_TICKS(timeout_ms)) {
-            break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(2));   /* the 32-byte FIFO holds while we yield */
-    }
-    return got;
-}
+      serial_port_read_exact(port, buf, n, timeout)
+          n bytes and no framing to look for. What a master wants, because a
+          master chose the request and knows the size of the reply.
+
+      serial_port_read_until(port, buf, cap, '\n', timeout)
+          collect until a terminator. Text protocols, when you asked first.
+
+      SerialFrame + serial_frame_poll(&rx, port)
+          the listener's shape: a frame can arrive in pieces across polls, so
+          the state lives between calls. Give it a start byte and it discards
+          noise until one arrives, which is how it finds its place again after
+          a garbled frame. See virtualDeviceProtocol.c.
+
+    This template is a poller, so it uses the first.                       */
 
 int protoTemplate_poll(SerialPort *port) {
     uint8_t rsp[PROTO_RSP_MAX];
@@ -82,7 +77,7 @@ int protoTemplate_poll(SerialPort *port) {
             serial_port_puts(port, req, sizeof(req));
         ------------------------------------------------------------------ */
 
-    n = proto_recv(port, rsp, sizeof(rsp), PROTO_RSP_TIMEOUT);
+    n = serial_port_read_exact(port, rsp, sizeof(rsp), PROTO_RSP_TIMEOUT);
     if (n <= 0) {
         return -1;                      /* timeout */
     }

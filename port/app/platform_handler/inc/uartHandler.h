@@ -163,6 +163,57 @@ void serial_port_tx_disable(SerialPort *port);
     is not read as the answer to the next one. */
 void serial_port_flush_rx(SerialPort *port);
 
+/*  ── Receiving a frame ────────────────────────────────────────────────────
+    Two shapes cover every framing this firmware uses, and both read through
+    serial_port_getc(), so the command-mode escape is still watched on every
+    byte they consume.
+
+    Which one you want follows from who speaks first:
+
+      a master that just sent a request knows what is coming and can afford to
+      wait for it   ->  serial_port_read_exact() / serial_port_read_until()
+
+      a listener has to keep its place between visits, because a frame can
+      arrive in pieces across several polls  ->  SerialFrame                */
+
+/*  Wait for exactly `want` bytes. Returns how many actually arrived, which is
+    less than `want` on timeout -- the caller decides whether a short frame is
+    an error. Use it when the reply length is known, which for a master it is. */
+int serial_port_read_exact(SerialPort *port, uint8_t *buf, int want,
+                           uint32_t timeout_ms);
+
+/*  Collect bytes until `term` arrives. Returns the length INCLUDING the
+    terminator, 0 if nothing came at all, or negative: -1 a frame started and
+    timed out part-built, -2 `cap` filled with no terminator in sight. */
+int serial_port_read_until(SerialPort *port, uint8_t *buf, int cap,
+                           uint8_t term, uint32_t timeout_ms);
+
+/*  A frame being assembled across polls.
+
+    `start` is the byte that opens a frame and anything before it is discarded,
+    which is what lets this resynchronise after a garbled frame -- pass 0 if
+    the protocol has no opening byte and every byte counts. `gap_ms` drops a
+    frame that started and never finished; without it one stray byte blocks
+    every frame after it for good. */
+typedef struct {
+    uint8_t  *buf;
+    uint16_t  cap;
+    uint16_t  len;
+    uint8_t   start;
+    uint8_t   term;
+    uint32_t  gap_ms;
+    uint32_t  started;      /* tick the current frame opened on */
+} SerialFrame;
+
+void serial_frame_init(SerialFrame *f, uint8_t *buf, uint16_t cap,
+                       uint8_t start, uint8_t term, uint32_t gap_ms);
+
+/*  Drain whatever the port has into the frame. Returns the length of a frame
+    that completed on this call -- NUL-terminated one past the end, so a text
+    parser can use the buffer as a string -- or 0 when nothing completed yet.
+    Call it from the task loop; it never blocks. */
+int serial_frame_poll(SerialFrame *f, SerialPort *port);
+
 /*  Turn hardware RTS/CTS off for this port whatever its stored setting says.
 
     A half-duplex bus has no use for RTS/CTS, and on an RS-485 port the RTS pin

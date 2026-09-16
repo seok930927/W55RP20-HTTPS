@@ -1,4 +1,8 @@
 #include <string.h>
+
+#include "FreeRTOS.h"
+#include "task.h"
+
 #include "common.h"
 #include "ConfigData.h"
 #include "deviceHandler.h"
@@ -519,6 +523,126 @@ uint8_t serial_port_in_command_mode(SerialPort *port) {
     return ((port->channel == SEG_DATA0_CH) && (opmode == DEVICE_AT_MODE)) ? 1u : 0u;
 }
 #endif
+
+/*  ── Receiving a frame — see uartHandler.h ────────────────────────────────
+    Both of these used to live inside a protocol: read_exact() is what
+    modbusMaster called mb_recv(), and SerialFrame is the accumulator the
+    virtual RS-232 protocol had written inline. Neither is specific to what the
+    bytes mean, so both sat one copy per protocol for no reason.
+
+    They yield for a couple of ticks between drains rather than spinning. The
+    RX FIFO holds 32 bytes, which is 2.7 ms of traffic at 115200 and longer at
+    every slower rate this driver offers, so nothing is lost by sleeping. */
+
+int serial_port_read_exact(SerialPort *port, uint8_t *buf, int want,
+                           uint32_t timeout_ms) {
+    TickType_t start = xTaskGetTickCount();
+    int got = 0;
+
+    if (port == NULL || buf == NULL || want <= 0) {
+        return 0;
+    }
+    while (got < want) {
+        int32_t ch;
+
+        while (got < want && (ch = serial_port_getc(port)) != RET_NOK) {
+            buf[got++] = (uint8_t)ch;
+        }
+        if (got >= want) {
+            break;
+        }
+        if ((xTaskGetTickCount() - start) >= pdMS_TO_TICKS(timeout_ms)) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+    return got;
+}
+
+int serial_port_read_until(SerialPort *port, uint8_t *buf, int cap,
+                           uint8_t term, uint32_t timeout_ms) {
+    TickType_t start = xTaskGetTickCount();
+    int len = 0;
+
+    if (port == NULL || buf == NULL || cap <= 0) {
+        return -2;
+    }
+    for (;;) {
+        int32_t ch;
+
+        while ((ch = serial_port_getc(port)) != RET_NOK) {
+            if (len >= cap) {
+                return -2;              /* cap full, no terminator */
+            }
+            buf[len++] = (uint8_t)ch;
+            if ((uint8_t)ch == term) {
+                return len;
+            }
+        }
+        if ((xTaskGetTickCount() - start) >= pdMS_TO_TICKS(timeout_ms)) {
+            return (len > 0) ? -1 : 0;  /* part-built, or nothing at all */
+        }
+        vTaskDelay(pdMS_TO_TICKS(2));
+    }
+}
+
+void serial_frame_init(SerialFrame *f, uint8_t *buf, uint16_t cap,
+                       uint8_t start, uint8_t term, uint32_t gap_ms) {
+    if (f == NULL) {
+        return;
+    }
+    f->buf     = buf;
+    f->cap     = cap;
+    f->len     = 0;
+    f->start   = start;
+    f->term    = term;
+    f->gap_ms  = gap_ms;
+    f->started = 0;
+}
+
+int serial_frame_poll(SerialFrame *f, SerialPort *port) {
+    int32_t ch;
+
+    if (f == NULL || port == NULL || f->buf == NULL || f->cap < 2) {
+        return 0;
+    }
+    /*  Drop a frame that opened and never closed. Without this one stray byte
+        that happens to be the start character blocks every frame after it. */
+    if (f->len > 0 && f->gap_ms != 0 &&
+            (xTaskGetTickCount() - (TickType_t)f->started)
+            >= pdMS_TO_TICKS(f->gap_ms)) {
+        f->len = 0;
+    }
+
+    while ((ch = serial_port_getc(port)) != RET_NOK) {
+        uint8_t b = (uint8_t)ch;
+
+        if (f->len == 0) {
+            /*  Everything before the opening byte is noise. Discarding it is
+                what makes this able to find its place again after a bad
+                frame -- a protocol with no opening byte passes start = 0 and
+                takes every byte instead. */
+            if (f->start != 0 && b != f->start) {
+                continue;
+            }
+            f->started = (uint32_t)xTaskGetTickCount();
+        }
+        if (f->len >= (uint16_t)(f->cap - 1)) {
+            f->len = 0;                 /* overlong: drop it and hunt again */
+            continue;
+        }
+        f->buf[f->len++] = b;
+
+        if (b == f->term) {
+            int len = (int)f->len;
+
+            f->buf[len] = '\0';         /* so a text parser can use it as-is */
+            f->len = 0;
+            return len;
+        }
+    }
+    return 0;
+}
 
 #ifdef __USE_GPIO_HARDWARE_FLOWCONTROL__
 

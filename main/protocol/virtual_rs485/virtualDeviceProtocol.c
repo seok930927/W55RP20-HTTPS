@@ -23,8 +23,7 @@ typedef struct {
     int32_t value[VIRTUAL_VALUE_COUNT];
 } VirtualDeviceValues;
 
-static int parse_frame(char *f, VirtualDeviceValues *values)
-{
+static int parse_frame(char *f, VirtualDeviceValues *values) {
     char *star = strchr(f, '*');
     unsigned got;
     unsigned xorv = 0;
@@ -49,12 +48,10 @@ static int parse_frame(char *f, VirtualDeviceValues *values)
     *star = '\0';
 
     if (sscanf(f, "@TEMP=%f;HUM=%f;ALARM=%ld",
-               &temperature, &humidity, &alarm) != 3)
-    {
+               &temperature, &humidity, &alarm) != 3) {
         return -1;
     }
-    if (alarm != 0 && alarm != 1)
-    {
+    if (alarm != 0 && alarm != 1) {
         return -1;
     }
 
@@ -69,13 +66,11 @@ static int parse_frame(char *f, VirtualDeviceValues *values)
     return 0;
 }
 
-void virtual_device_task(void *argument)
-{
+void virtual_device_task(void *argument) {
     SerialPort *port = (SerialPort *)argument;
     uint8_t src;
-    char frame[FRAME_MAX];
-    size_t frame_length = 0;
-    TickType_t frame_started = 0;
+    uint8_t frame[FRAME_MAX];
+    SerialFrame rx;
     VirtualDeviceValues values;
 
     if (!port) {
@@ -93,60 +88,27 @@ void virtual_device_task(void *argument)
     serial_port_hw_flow_disable(port);
     device_bank_assign(src, 0, "VIRTUAL-232");
 
-    for (;;)
-    {
-        int32_t c;
+    /*  '@' opens a frame and '\n' closes it. Anything before the '@' is
+        discarded, so a garbled frame costs one frame and not the link. */
+    serial_frame_init(&rx, frame, FRAME_MAX, '@', '\n', FRAME_TIMEOUT_MS);
 
-        if (frame_length > 0 &&
-                (xTaskGetTickCount() - frame_started) >=
-                pdMS_TO_TICKS(FRAME_TIMEOUT_MS))
-        {
-            PRT_INFO("virtual protocol: frame timeout\r\n");
-            frame_length = 0;
-        }
-
+    for (;;) {
         if (serial_port_in_command_mode(port)) {
             vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
 
-        while ((c = serial_port_getc(port)) != RET_NOK)
-        {
-            if (frame_length == 0 && c != '@') {
-                continue;
-            }
-
-            if (frame_length == 0) {
-                frame_started = xTaskGetTickCount();
-            }
-
-            if (frame_length < FRAME_MAX - 1) {
-                frame[frame_length++] = (char)c;
-            } else {
-                frame_length = 0;
-                continue;
-            }
-
-            if (c == '\n')
-            {
-                frame[frame_length] = '\0';
-
-                if (!parse_frame(frame, &values))
-                {
-                    for (uint8_t column = 0;
-                            column < VIRTUAL_VALUE_COUNT;
-                            column++)
-                    {
-                        device_bank_setValue(src, 0, column,
-                                              values.value[column]);
-                    }
-
-                    snmp_notify_device((uint8_t)device_bank_row(src, 0));
-                } else {
-                    PRT_INFO("virtual protocol: invalid frame\r\n");
+        /*  Hunting for the start byte, bounding the buffer and dropping a
+            part-built frame all happen in here now. What is left is what this
+            protocol is actually about: what the bytes mean. */
+        if (serial_frame_poll(&rx, port) > 0) {
+            if (parse_frame((char *)frame, &values) == 0) {
+                for (uint8_t column = 0; column < VIRTUAL_VALUE_COUNT; column++) {
+                    device_bank_setValue(src, 0, column, values.value[column]);
                 }
-
-                frame_length = 0;
+                snmp_notify_device((uint8_t)device_bank_row(src, 0));
+            } else {
+                PRT_INFO("virtual protocol: invalid frame\r\n");
             }
         }
         vTaskDelay(pdMS_TO_TICKS(2));
