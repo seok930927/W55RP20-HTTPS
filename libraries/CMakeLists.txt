@@ -184,6 +184,7 @@ target_include_directories(SNMP_FILES PUBLIC
         ${WIZNET_DIR}/Ethernet
         ${WIZNET_DIR}/Internet/SNMP
         ${APP_PORT_DIR}/platform_handler/inc
+        ${CMAKE_SOURCE_DIR}/main/device
         )
 
 target_link_libraries(SNMP_FILES PUBLIC

@@ -197,14 +197,14 @@ target_sources(APP_PLATFORM_FILES PUBLIC
         ${APP_PORT_DIR}/platform_handler/src/httpHandler.c
         ${APP_PORT_DIR}/platform_handler/src/httpsAuth.c
         ${APP_PORT_DIR}/platform_handler/src/netHandler.c
-        ${APP_PORT_DIR}/platform_handler/src/snmpHandler.c
-        ${APP_PORT_DIR}/platform_handler/src/snmpBuffer.c
-        ${APP_PORT_DIR}/platform_handler/src/sensor.c
-        ${APP_PORT_DIR}/platform_handler/src/sensorUart.c
-        ${APP_PORT_DIR}/platform_handler/src/modbusMaster.c
-        ${APP_PORT_DIR}/platform_handler/src/protoTemplate.c
-        ${APP_PORT_DIR}/platform_handler/src/digitalInput.c
-        ${APP_PORT_DIR}/platform_handler/src/serialProtocol.c
+        ${CMAKE_SOURCE_DIR}/main/service/snmp/snmpHandler.c
+        ${CMAKE_SOURCE_DIR}/main/service/snmp/snmpBuffer.c
+        ${CMAKE_SOURCE_DIR}/main/device/sensor.c
+        ${CMAKE_SOURCE_DIR}/main/protocol/sensor_uart/sensorUart.c
+        ${CMAKE_SOURCE_DIR}/main/protocol/modbus/modbusMaster.c
+        ${CMAKE_SOURCE_DIR}/main/protocol/template/protoTemplate.c
+        ${CMAKE_SOURCE_DIR}/main/input/digitalInput.c
+        ${CMAKE_SOURCE_DIR}/main/protocol/manager/serialProtocol.c
         ${APP_PORT_DIR}/platform_handler/src/spiHandler.c
         ${APP_PORT_DIR}/platform_handler/src/storageHandler.c
         ${APP_PORT_DIR}/platform_handler/src/timerHandler.c
@@ -213,6 +213,13 @@ target_sources(APP_PLATFORM_FILES PUBLIC
 
 target_include_directories(APP_PLATFORM_FILES PUBLIC
         ${APP_PORT_DIR}/platform_handler/inc
+        ${CMAKE_SOURCE_DIR}/main/device
+        ${CMAKE_SOURCE_DIR}/main/input
+        ${CMAKE_SOURCE_DIR}/main/protocol/manager
+        ${CMAKE_SOURCE_DIR}/main/protocol/template
+        ${CMAKE_SOURCE_DIR}/main/protocol/sensor_uart
+        ${CMAKE_SOURCE_DIR}/main/protocol/modbus
+        ${CMAKE_SOURCE_DIR}/main/service/snmp
         ${APP_PORT_DIR}/html_file
         ${APP_PORT_DIR}/serial_to_ethernet/inc
         ${APP_PORT_DIR}/aws-iot-device-sdk-embedded-C/inc
