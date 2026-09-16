@@ -4,6 +4,7 @@
 #include "seg.h"                /* SEG_DATA0_CH                              */
 #include "modbusMaster.h"       /* modbusMaster_task                         */
 #include "WIZ5XXSR-RP_Debug.h"  /* PRT_INFO                                  */
+#include "virtualDeviceProtocol.h"
 
 /*  One row per protocol. Order does not matter; the id is what binds a row to
     the value stored in serial_option.protocol.
@@ -27,6 +28,7 @@
 const SerialProtocol g_serial_protocol[] = {
     { protocol_none,   "Free",         NULL,               0,    0 },
     { modbus_rtu,      "Modbus RTU",   modbusMaster_task,  1024, 9 },
+    { protocol_custom, "Virtual RS-232", virtual_device_task, 1024, 9 },
 };
 
 const uint8_t g_serial_protocol_cnt =

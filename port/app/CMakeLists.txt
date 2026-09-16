@@ -205,6 +205,7 @@ target_sources(APP_PLATFORM_FILES PUBLIC
         ${CMAKE_SOURCE_DIR}/main/protocol/template/protoTemplate.c
         ${CMAKE_SOURCE_DIR}/main/input/digitalInput.c
         ${CMAKE_SOURCE_DIR}/main/protocol/manager/serialProtocol.c
+        ${CMAKE_SOURCE_DIR}/main/protocol/virtual_rs485/virtualDeviceProtocol.c
         ${APP_PORT_DIR}/platform_handler/src/spiHandler.c
         ${APP_PORT_DIR}/platform_handler/src/storageHandler.c
         ${APP_PORT_DIR}/platform_handler/src/timerHandler.c
@@ -220,6 +221,7 @@ target_include_directories(APP_PLATFORM_FILES PUBLIC
         ${CMAKE_SOURCE_DIR}/main/protocol/sensor_uart
         ${CMAKE_SOURCE_DIR}/main/protocol/modbus
         ${CMAKE_SOURCE_DIR}/main/service/snmp
+        ${CMAKE_SOURCE_DIR}/main/protocol/virtual_rs485
         ${APP_PORT_DIR}/html_file
         ${APP_PORT_DIR}/serial_to_ethernet/inc
         ${APP_PORT_DIR}/aws-iot-device-sdk-embedded-C/inc
