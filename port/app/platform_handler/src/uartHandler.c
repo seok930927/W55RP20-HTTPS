@@ -188,7 +188,11 @@ void serial_port_setup(SerialPort *port) {
     /*  0 means unset, and GPIO0 is a UART TX pin so it can never be DE. */
     port->de_pin = (cfg_de != 0 && cfg_de <= 29) ? cfg_de : port->de_pin_board;
     port->intf = (cfg_intf > UART_IF_RS485_REVERSE) ? UART_IF_RS232_TTL : cfg_intf;
-    port->protocol = (serial_option->protocol > sec_ups)
+    /*  protocol_custom (4) is a real application protocol registered in
+        serialProtocol.c.  Comparing against sec_ups (3) silently converted
+        it to protocol_none, so the web setting showed Virtual RS-232 while
+        the runtime status showed Free. */
+    port->protocol = (serial_option->protocol > protocol_custom)
                      ? protocol_none : serial_option->protocol;
     uint8_t intf = port->intf;
     uint8_t tx_pin = port->tx_pin;
