@@ -41,8 +41,8 @@ SNMP 테이블과 웹 JSON은 전부 여기서 읽어간다.
 
 | 파일 | 역할 |
 |---|---|
-| [port/app/platform_handler/inc/sensor.h](port/app/platform_handler/inc/sensor.h) | device bank 정의 (`DEVICE_COUNT 64`, `DEVICE_VALUE_COLS 3`) |
-| [port/app/platform_handler/src/sensor.c](port/app/platform_handler/src/sensor.c) | 값 컬럼 카탈로그 `g_value_columns[]` (Temperature / Humidity / Alarm) |
+| [main/device/sensor.h](main/device/sensor.h) | device bank 정의 (`DEVICE_COUNT 64`, `DEVICE_VALUE_COLS 3`) |
+| [main/device/sensor.c](main/device/sensor.c) | 값 컬럼 카탈로그 `g_value_columns[]` (Temperature / Humidity / Alarm) |
 
 ## 1.2 독자별 읽는 법
 
@@ -84,10 +84,13 @@ SNMP 테이블과 웹 JSON은 전부 여기서 읽어간다.
 
 ### 최상위
 
+**트리가 계층을 그대로 그린다. `main/` 은 읽으라고 있는 곳이고, `port/` 는
+안 봐도 되게 하려고 있는 곳이다.**
+
 | 경로 | 내용 | 건드릴 일 |
 |---|---|---|
-| [main/](main/) | 실행 진입점 3종 (App / Boot / SPI_Mode_Master) | 태스크 추가할 때 |
-| [port/app/](port/app/) | **앱 펌웨어 본체.** 작업의 95% 가 여기 | 항상 |
+| [main/](main/) | **응용 계층.** 센서·프로토콜·SNMP·진입점. **작업의 대부분이 여기** | 항상 |
+| [port/app/](port/app/) | **드라이버·플랫폼 계층.** UART·HTTPS·플래시·네트워크·설정 저장 | 드라이버를 고칠 때만 |
 | [port/boot/](port/boot/) | 부트로더. 앱과 별개 소스트리 | 거의 없음 (읽기만) |
 | [libraries/](libraries/) | 서브모듈 5개 + 라이브러리 CMake | SNMP 손댈 때만 |
 | [tools/](tools/) | 빌드 보조 파이썬 스크립트 | HTML 재생성 시 |
@@ -95,13 +98,31 @@ SNMP 테이블과 웹 JSON은 전부 여기서 읽어간다.
 | [Dev_data/](Dev_data/) | 규격서·캡처 로그·인수인계 문서 | 프로토콜 붙일 때 |
 | `bin_files/` | 빌드 산출물 (git 무시) | — |
 
+### `main/` 내부 — 여기가 작업하는 곳
+
+| 경로 | 무엇이 들었나 |
+|---|---|
+| [device/](main/device/) | **데이터 뱅크.** `sensor.c/.h` — 값이 모이는 곳과 값 컬럼 카탈로그 `g_value_columns[]` |
+| [input/](main/input/) | `digitalInput.c/.h` — CN10/CN11 접점 입력 16개 |
+| [protocol/manager/](main/protocol/manager/) | `serialProtocol.c/.h` — **프로토콜 등록표.** 여기에 한 줄이 곧 웹 드롭다운의 한 항목 |
+| [protocol/modbus/](main/protocol/modbus/) | `modbusMaster.c/.h` — Modbus-RTU 마스터 |
+| [protocol/sensor_uart/](main/protocol/sensor_uart/) | `sensorUart.c/.h` — S/T/R 텍스트 프로토콜 |
+| [protocol/virtual_rs485/](main/protocol/virtual_rs485/) | `virtualDeviceProtocol.c/.h` — 가상 장치 (센서 없이 시험할 때) |
+| [protocol/template/](main/protocol/template/) | `protoTemplate.c/.h` — **복사해서 고치라고 있는 골격** ([4.4](#44-새-시리얼-프로토콜-추가)) |
+| [service/snmp/](main/service/snmp/) | `snmpHandler.c/.h` (에이전트 태스크·트랩·임계값 감시), `snmpBuffer.c/.h` |
+| [App/](main/App/), [Boot/](main/Boot/), [SPI_Mode_Master/](main/SPI_Mode_Master/) | 실행 진입점 3종 |
+
+새 프로토콜은 `protocol/` 아래 **자기 폴더**를 갖는다. 소스를 등록하는 곳은
+[port/app/CMakeLists.txt](port/app/CMakeLists.txt) 의 `APP_PLATFORM_FILES` 와
+`target_include_directories` 두 군데다 ([4.6](#46-소스-파일-추가-cmake-등록)).
+
 ### `port/app/` 내부
 
 | 경로 | 무엇이 들었나 | CMake 타겟 |
 |---|---|---|
 | [board/](port/app/board/) | 보드 핀 정의 `WIZnet_board.h`, LED/스트랩핀 | `APP_BOARD_FILES` |
 | [configuration/](port/app/configuration/) | **DevConfig**(설정 구조체·플래시 저장), SEGCP(설정 프로토콜), 공통 상수 `common.h` | `APP_CONFIG_FILES` |
-| [platform_handler/](port/app/platform_handler/) | **작업의 중심.** UART·SNMP·HTTPS·센서·GPIO·플래시 핸들러 전부 | `APP_PLATFORM_FILES` |
+| [platform_handler/](port/app/platform_handler/) | **드라이버 계층.** UART·HTTPS·네트워크·플래시·GPIO. 응용 코드는 `main/` 으로 나갔다 | `APP_PLATFORM_FILES` |
 | [html_file/](port/app/html_file/) | `Web_page.html` (원본) + `Web_page.h` (**생성물**) | — (헤더만 include) |
 | [serial_to_ethernet/](port/app/serial_to_ethernet/) | S2E 게이트웨이 로직 (현재 미동작) | `APP_S2E_FILES` |
 | [modbus/](port/app/modbus/) | Modbus 라이브러리 (CRC 함수만 실제로 쓰임) | `APP_MODBUS_FILES` |
@@ -110,19 +131,16 @@ SNMP 테이블과 웹 JSON은 전부 여기서 읽어간다.
 | [timer/](port/app/timer/), [http_server/](port/app/http_server/) | 타이머, 구버전 HTTP 서버(현재 `EXCLUDE_FROM_ALL`) | `APP_TIMER_FILES` / `APP_HTTPSERVER_FILES` |
 | [FreeRTOS-Kernel/inc/FreeRTOSConfig.h](port/app/FreeRTOS-Kernel/inc/FreeRTOSConfig.h) | RTOS 설정 | — |
 
-### `platform_handler/` 파일별 역할 (여기가 제일 중요)
+### `platform_handler/` 파일별 역할 — 드라이버 계층
+
+**대부분 읽을 일이 없다.** 응용 코드가 여기에 의존하는 지점은 `uartHandler.h` 의
+포트 API([3장](#3장-드라이버-계층-api))와 `httpHandler.c` 의 설정 테이블
+([4.2](#42-웹-설정-항목-추가)) 정도다.
 
 | 파일 | 역할 |
 |---|---|
-| `uartHandler.c/.h` | **UART 드라이버 계층.** 포맷 설정, RS-485 DE 제어, 바이트 입출력 |
-| `sensorUart.c/.h` | S/T/R 텍스트 프로토콜 파서 + 두 포트 RX ISR |
-| `modbusMaster.c/.h` | Modbus-RTU 마스터 폴러. 값 컬럼 수만큼 입력 레지스터를 읽는다 |
-| `protoTemplate.c/.h` | **새 프로토콜 골격.** 복사해서 고치라고 있는 파일 ([4.4](#44-새-시리얼-프로토콜-추가)) |
-| `digitalInput.c/.h` | CN10/CN11 접점 입력 16개 → device bank. `DIN_COUNT` 가 없는 보드에서는 태스크가 즉시 종료 |
-| `sensor.c/.h` | device bank + 값 컬럼 카탈로그 `g_value_columns[]` |
-| `snmpHandler.c/.h` | SNMP 에이전트 태스크, 트랩 큐, 런타임 설정 주입 |
-| `snmpBuffer.c/.h` | 레거시 SNMP 데이터 버퍼 (웹 "통신데이타" 탭에서만 사용) |
-| `httpHandler.c/.h` | **HTTPS 서버 전체** — 라우팅, JSON GET/POST, 세션 |
+| `uartHandler.c/.h` | **UART 드라이버.** 포맷 설정, RS-485 DE 제어, 바이트 입출력. 프로토콜이 쓰는 유일한 드라이버 |
+| `httpHandler.c/.h` | **HTTPS 서버 전체** — 라우팅, JSON GET/POST, 세션, 설정 테이블 |
 | `httpsAuth.c/.h` | 계정/세션 관리 (플래시 저장) |
 | `netHandler.c/.h` | PHY 링크 / DHCP 상태머신 |
 | `deviceHandler.c/.h` | 플래시 맵, 리부트, 워치독, 펌웨어 업데이트 |
@@ -172,13 +190,14 @@ SNMP 테이블과 웹 JSON은 전부 여기서 읽어간다.
 | `Start_Task` | `start_task` | [App.c:201](main/App/App.c#L201) | 65 | **31** ⚠ | 512 / 2 KB | 초기화 후 self-delete |
 | `Net_Status_Task` | `net_status_task` | [netHandler.c:40](port/app/platform_handler/src/netHandler.c#L40) | 8 | 8 | 1024 / 4 KB | PHY 링크 감시, DHCP 갱신 |
 | `http_webserver_task` | `http_webserver_task` | [httpHandler.c:1358](port/app/platform_handler/src/httpHandler.c#L1358) | 23 | 23 | 2048 / 8 KB | HTTPS 서버 (소켓 4·5·6) |
-| `SNMP_Agent_Task` | `snmp_agent_task` | [snmpHandler.c:119](port/app/platform_handler/src/snmpHandler.c#L119) | 7 | 7 | 2048 / 8 KB | SNMP 요청 처리 + 트랩 송신 (소켓 7) |
+| `SNMP_Agent_Task` | `snmp_agent_task` | [snmpHandler.c:119](main/service/snmp/snmpHandler.c#L119) | 7 | 7 | 2048 / 8 KB | SNMP 요청 처리 + 트랩 송신 (소켓 7) |
 | `SEGCP_udp_Task` | `segcp_udp_task` | [segcp.c:1709](port/app/configuration/src/segcp.c#L1709) | 52 | **31** ⚠ | 1024 / 4 KB | 설정툴 UDP 검색 (소켓 1) |
 | `SEGCP_tcp_Task` | `segcp_tcp_task` | [segcp.c:1724](port/app/configuration/src/segcp.c#L1724) | 51 | **31** ⚠ | 1024 / 4 KB | 설정툴 TCP 접속 (소켓 2) |
 | `SEGCP_serial_Task` | `segcp_serial_task` | [segcp.c:1740](port/app/configuration/src/segcp.c#L1740) | 50 | **31** ⚠ | 1024 / 4 KB | 시리얼 AT 커맨드 (`+++` 진입) |
-| `Sensor_UART_Task` | `sensorUart_task` | [sensorUart.c:360](port/app/platform_handler/src/sensorUart.c#L360) | 9 | 9 | 1024 / 4 KB | S/T/R 라인 파싱 |
-| `Modbus_ch0` / `Modbus_ch1` | `modbusMaster_task` | [modbusMaster.c](port/app/platform_handler/src/modbusMaster.c) | 9 | 9 | 1024 / 4 KB | **포트별 조건부 생성** — 그 포트의 `protocol == modbus_rtu` 일 때만. 인자로 `&g_serial_port[p]` 전달. 스택·우선순위는 `g_serial_protocol[]` 행에서 온다 |
-| `Digital_Input_Task` | `digitalInput_task` | [digitalInput.c:146](port/app/platform_handler/src/digitalInput.c#L146) | 8 | 8 | 512 / 2 KB | CN10/CN11 접점 16개를 200 ms 마다 읽어 뱅크에 기록. **시리얼 프로토콜 태스크보다 뒤에 생성** — 뱅크 행을 먼저 온 순서로 나눠주기 때문 |
+| `Sensor_UART_Task` | `sensorUart_task` | [sensorUart.c:360](main/protocol/sensor_uart/sensorUart.c#L360) | 9 | 9 | 1024 / 4 KB | S/T/R 라인 파싱 |
+| `Modbus_ch0` / `Modbus_ch1` | `modbusMaster_task` | [modbusMaster.c](main/protocol/modbus/modbusMaster.c) | 9 | 9 | 1024 / 4 KB | **포트별 조건부 생성** — 그 포트의 `protocol == modbus_rtu` 일 때만. 인자로 `&g_serial_port[p]` 전달. 스택·우선순위는 `g_serial_protocol[]` 행에서 온다 |
+| `Digital_Input_Task` | `digitalInput_task` | [digitalInput.c:146](main/input/digitalInput.c#L146) | 8 | 8 | 512 / 2 KB | CN10/CN11 접점 16개를 200 ms 마다 읽어 뱅크에 기록. **시리얼 프로토콜 태스크보다 뒤에 생성** — 뱅크 행을 먼저 온 순서로 나눠주기 때문 |
+| `Virtual_ch0` / `Virtual_ch1` | `virtual_device_task` | [virtualDeviceProtocol.c](main/protocol/virtual_rs485/virtualDeviceProtocol.c) | 9 | 9 | 1024 / 4 KB | 〃 — `protocol == protocol_custom` 일 때. 센서 없이 값이 도는지 보려고 있는 가상 장치 |
 | `Tmr Svc` | (FreeRTOS 내장) | — | 31 | 31 | 1024 / 4 KB | 소프트웨어 타이머 |
 | `Heap_Monitor_Task` | `heap_monitor_task` | [App.c:191](main/App/App.c#L191) | 6 | — | 1024 / 4 KB | **주석 처리됨** ([App.c:292](main/App/App.c#L292)) |
 
@@ -208,7 +227,7 @@ SNMP 테이블과 웹 JSON은 전부 여기서 읽어간다.
 | `segcp_udp_sem` / `segcp_tcp_sem` | App.c:276-277 | Counting | SEGCP 내부 |
 | `wizchip_critical_sem` | [w5x00_spi.c:207](port/app/ioLibrary_Driver/src/w5x00_spi.c#L207) | Counting(1) | W5500 SPI 배타 접근 |
 | `flash_critical_sem` | [flashHandler.c:43](port/app/platform_handler/src/flashHandler.c#L43) | Mutex | 플래시 배타 접근 |
-| `s_uart_sem` | [sensorUart.c:137](port/app/platform_handler/src/sensorUart.c#L137) | Binary | RX ISR → `sensorUart_task` 기상 신호 |
+| `s_uart_sem` | [sensorUart.c:137](main/protocol/sensor_uart/sensorUart.c#L137) | Binary | RX ISR → `sensorUart_task` 기상 신호 |
 
 소프트웨어 타이머는 `reset_timer` 하나만 생성된다 ([App.c:282](main/App/App.c#L282), 5초 원샷).
 
@@ -599,6 +618,26 @@ SerialPort *q = &g_serial_port[SEG_DATA1_CH];   /* RS-485 포트 (uart0) */
 
 > **모든 수신은 `serial_port_getc()` 를 통과해야 한다.**
 > `uart_getc()` 를 직접 부르면 AT 이스케이프 감시를 건너뛴다 ([3.6](#36-at-이스케이프)).
+> 아래 프레이밍 함수들은 전부 이걸 통과하므로 직접 쓸 일은 거의 없다.
+
+**프레이밍 — 프로토콜이 직접 짤 필요 없다**
+
+| 시그니처 | 어떤 프로토콜용 |
+|---|---|
+| `int serial_port_read_exact(port, buf, n, timeout_ms)` | **길이를 아는 쪽.** 내가 요청을 보냈으니 응답 크기도 안다 → 마스터. 실제로 온 바이트 수를 돌려준다 |
+| `int serial_port_read_until(port, buf, cap, term, timeout_ms)` | **끝 문자로 끊는 쪽**, 단 내가 먼저 물었을 때. 종료 문자 **포함** 길이를 돌려준다 |
+| `SerialFrame` + `int serial_frame_poll(&rx, port)` | **상대가 아무 때나 보내는 쪽.** 프레임이 여러 번에 걸쳐 도착하므로 상태가 호출 사이에 남는다 |
+
+`serial_port_read_until()` 의 반환값: **양수** = 프레임 길이, **0** = 아무것도 안 옴,
+**−1** = 시작은 했는데 타임아웃, **−2** = `cap` 이 찼는데 종료 문자가 없음.
+
+`SerialFrame` 은 `serial_frame_init(&rx, buf, cap, 시작문자, 종료문자, gap_ms)` 로 한 번
+세팅한다. **시작 문자 앞의 바이트는 전부 버린다** — 프레임이 깨져도 다음 프레임에서
+제자리를 찾는 이유가 이것이다. 시작 문자가 없는 프로토콜은 0 을 넘긴다.
+`gap_ms` 는 시작만 하고 안 끝난 프레임을 버리는 시간이다. **이게 없으면 잘못 들어온
+한 바이트가 이후 모든 프레임을 영구히 막는다.**
+
+완성된 프레임은 끝에 `'\0'` 이 붙어 나오므로 텍스트 파서에 그대로 넘길 수 있다.
 
 ### (C) 방향(DE) 제어
 
@@ -662,7 +701,7 @@ uint8_t frame[8] = { 0x01, 0x04, 0x00, 0x00, 0x00, 0x02, 0x71, 0xCB };
 serial_port_puts(port, frame, sizeof(frame));
 ```
 
-프레임을 직접 써야 할 때만 DE 를 손으로 감싼다 ([modbusMaster.c](port/app/platform_handler/src/modbusMaster.c) 방식):
+프레임을 직접 써야 할 때만 DE 를 손으로 감싼다 ([modbusMaster.c](main/protocol/modbus/modbusMaster.c) 방식):
 
 ```c
 #ifdef __USE_UART_485_422__
@@ -683,35 +722,56 @@ serial_port_puts(port, frame, sizeof(frame));
 | ☐ | `tx_enable` / `tx_disable` 이 짝을 이루는가 |
 | ☐ | RS-422/TTL 에서는 둘 다 no-op 이라 그냥 둬도 된다 |
 
-### 레시피 2 — 바이트 받기
+### 레시피 2 — 프레임 받기
+
+**루프를 직접 짜지 마라.** 드라이버가 프레이밍을 한다.
+
+**① 응답 길이를 아는 경우 — 마스터**
 
 ```c
-SerialPort *port = &g_serial_port[SEG_DATA1_CH];
+uint8_t rsp[11];
+int n = serial_port_read_exact(port, rsp, sizeof(rsp), 150);
 
-while (uart_is_readable(port->uart)) {
-    int32_t ch = serial_port_getc(port);
-    if (ch == RET_NOK) {
-        continue;                     /* 이스케이프 감시가 가져갔다 */
-    }
-    /* ch 를 프로토콜 데이터로 처리 */
+if (n != (int)sizeof(rsp)) {
+    return -1;                        /* 타임아웃 또는 짧은 프레임 */
 }
 ```
 
-폴링 방식이면 타임아웃과 양보를 잊지 말 것 ([modbusMaster.c `mb_recv()`](port/app/platform_handler/src/modbusMaster.c) 참고):
+**② 상대가 아무 때나 보내는 경우 — 리스너**
 
 ```c
-TickType_t start = xTaskGetTickCount();
-int got = 0;
-while (got < want) {
-    int32_t ch;
-    while (got < want && (ch = serial_port_getc(port)) != RET_NOK) {
-        buf[got++] = (uint8_t)ch;
+uint8_t     buf[96];
+SerialFrame rx;
+
+serial_frame_init(&rx, buf, sizeof(buf), '@', '\n', 500);
+/*                                        │    │     └ 미완성 프레임 폐기 시간
+                                          │    └────── 종료 문자
+                                          └─────────── 시작 문자 (없으면 0)   */
+
+for (;;) {
+    if (serial_frame_poll(&rx, port) > 0) {
+        /* buf 에 완결된 프레임 하나. '\0' 도 붙어 있다 */
     }
-    if (got >= want) break;
-    if ((xTaskGetTickCount() - start) >= pdMS_TO_TICKS(timeout_ms)) break;
-    vTaskDelay(pdMS_TO_TICKS(2));     /* RX FIFO 32B 가 버텨준다 */
+    vTaskDelay(pdMS_TO_TICKS(2));
 }
 ```
+
+실제 예는 [virtualDeviceProtocol.c](main/protocol/virtual_rs485/virtualDeviceProtocol.c) 다.
+시작 문자 찾기·버퍼 상한·타임아웃이 전부 드라이버로 들어가서, 프로토콜 쪽에 남은 건
+**바이트의 의미를 해석하는 부분뿐**이다.
+
+**③ 바이트 하나씩 직접 다뤄야 한다면**
+
+```c
+int32_t ch = serial_port_getc(port);
+if (ch == RET_NOK) {
+    /* 비었거나, 이스케이프 감시가 가져갔다. 프로토콜 데이터가 아니다 */
+}
+```
+
+> ISR 로 받는 프로토콜은 이 함수들을 쓰지 않는다. 바이트가 링 버퍼를 거쳐 오기
+> 때문에 소스가 다르다 — [sensorUart.c](main/protocol/sensor_uart/sensorUart.c) 가
+> 그 방식이고, 이 펌웨어에서 유일하다.
 
 ### 레시피 3 — 통신 포맷 바꾸기
 
@@ -815,12 +875,23 @@ if ((port->channel == SEG_DATA0_CH) && (opmode == DEVICE_AT_MODE)) {
 | `stop_bit` | 0=`stop_bit1`(1), 1=`stop_bit2`(2) | `stop_bit_table[]` | (웹 미노출) | — |
 | `parity` | 0=none, 1=odd, 2=even, **3=space, 4=mark** | `parity_table[]` = `"N","ODD","EVEN","SPACE","MARK"` | 0~4 | 4 |
 | `flow_ctrl` | 0=none, 1=xon_xoff, 2=rts_cts, 3=rtsonly, 4=reverserts | `flow_ctrl_table[]` | 0/1/2 만 노출 | 4 |
-| `protocol` | 0=none(S/T/R), 1=`modbus_rtu`, 2=`modbus_ascii`, 3=`sec_ups`, 4=`protocol_custom` | — | **0~1** | 1 |
+| `protocol` | 0=none(S/T/R), 1=`modbus_rtu`, 2=`modbus_ascii`, 3=`sec_ups`, 4=`protocol_custom` | — | **0 / 1 / 4** | 4 |
 | `UART_IF_*` | 0=`RS232_TTL`, 1=`RS422`, 2=`RS485`, 3=`RS485_REVERSE`, 4=`SPI_IF_SLAVE` | `uart_if_table[]` | 0~3 | 3 |
 
-**enum 에 이름이 있는 것과 고를 수 있는 것은 다르다.** 드롭다운과 POST 검증은 전부 [serialProtocol.c](port/app/platform_handler/src/serialProtocol.c) 의 표에서 나오고, 그 표는 **구현된 것만** 담는다 — 현재 `none`(S/T/R) 과 `modbus_rtu` 둘이다.
+**enum 에 이름이 있는 것과 고를 수 있는 것은 다르다.** 드롭다운은 전부 [serialProtocol.c](main/protocol/manager/serialProtocol.c) 의 표에서 나오고, 그 표는 **구현된 것만** 담는다 — 현재 셋이다.
 
-`modbus_ascii`(2), `sec_ups`(3), `protocol_custom`(4) 는 enum 에만 있고 표에는 없다. 구현이 없는 항목을 드롭다운에 두면 **고르면 저장까지 되는데 아무 일도 안 일어나기 때문**이다. 구현하면 표에 행을 추가한다 — [4.4](#44-새-시리얼-프로토콜-추가) 참조.
+| id | 표시 이름 | 태스크 |
+|---|---|---|
+| 0 `protocol_none` | Free | 없음 — sensorUart 가 포트를 잡고 S/T/R 을 파싱 |
+| 1 `modbus_rtu` | Modbus RTU | `modbusMaster_task` |
+| 4 `protocol_custom` | Virtual RS-232 | `virtual_device_task` — 센서 없이 값이 도는지 보는 가상 장치 |
+
+`modbus_ascii`(2) 와 `sec_ups`(3) 는 enum 에만 있고 표에는 없다. 구현이 없는 항목을 드롭다운에 두면 **고르면 저장까지 되는데 아무 일도 안 일어나기 때문**이다. 구현하면 표에 행을 추가한다 — [4.4](#44-새-시리얼-프로토콜-추가) 참조.
+
+> ⚠ **POST 검증 상한은 표의 최댓값 하나다.** `serial_protocol_max_id()` 가 4 를 돌려주므로
+> POST 는 0~4 를 전부 받아주고, 그 안의 2·3 은 행이 없어 저장은 되지만 아무 태스크도
+> 뜨지 않는다 — `Free` 처럼 동작한다. 웹 드롭다운에는 안 나오니 조작해서 보낼 때만
+> 생기는 틈이지만, id 를 띄엄띄엄 쓰면 이런 구멍이 생긴다는 것은 알고 있어야 한다.
 
 ### 같은 필드에 두 개의 enum이 있다
 
@@ -1054,8 +1125,8 @@ if (parse_json_str(actual_body, "\"my_str\":", conf->my_str, sizeof(conf->my_str
 
 | # | 파일 | 할 일 |
 |---|---|---|
-| 1 | [sensor.h:32](port/app/platform_handler/inc/sensor.h#L32) | `DEVICE_VALUE_COLS` 를 3 → 4 |
-| 2 | [sensor.c:11-15](port/app/platform_handler/src/sensor.c#L11-L15) | `g_value_columns[]` 에 `{ "Pressure", "hPa", -1 }` 추가 (배열 길이 = `DEVICE_VALUE_COLS`) |
+| 1 | [sensor.h:32](main/device/sensor.h#L32) | `DEVICE_VALUE_COLS` 를 3 → 4 |
+| 2 | [sensor.c:11-15](main/device/sensor.c#L11-L15) | `g_value_columns[]` 에 `{ "Pressure", "hPa", -1 }` 추가 (배열 길이 = `DEVICE_VALUE_COLS`) |
 | 3 | — | SNMP 테이블·웹 표·웹 임계값 행·S/T/R 컬럼 수가 **자동으로** 따라온다 |
 
 ⚠ **하지만 자동으로 따라오지 않는 것이 둘 있다.**
@@ -1181,7 +1252,7 @@ snmp_notify_device(dev);      /* 그 디바이스의 모든 값 컬럼 */
 ### 4.3.4 런타임 SNMP 설정 API
 
 앱 → SNMP 코어로 값을 주입하는 함수들. 전부 `snmpd_run()` 전에 호출해야 한다.
-호출처: [`snmp_agent_init()` snmpHandler.c:43](port/app/platform_handler/src/snmpHandler.c#L43)
+호출처: [`snmp_agent_init()` snmpHandler.c:43](main/service/snmp/snmpHandler.c#L43)
 
 | 함수 | 인자 | 기본 동작 |
 |---|---|---|
@@ -1198,12 +1269,17 @@ snmp_notify_device(dev);      /* 그 디바이스의 모든 값 컬럼 */
 
 ## 4.4 새 시리얼 프로토콜 추가
 
-**이미 만들어진 예가 하나 있다 — S/T/R 이다.** [sensorUart.c](port/app/platform_handler/src/sensorUart.c) 가 그것이고, 이 펌웨어에 붙은 커스텀 프로토콜은 지금 이 하나뿐이다. 직렬로 들어온 한 줄을 파싱해서 device bank 에 넣고 답을 돌려주는, 프로토콜이 해야 할 일을 전부 갖춘 최소 예제다. **새로 만들 때 이것과 같은 모양으로 하면 된다.**
+**이미 만들어진 예가 둘 있다. 새로 만들 때 이 모양으로 하면 된다.**
 
-빈 골격에서 시작하고 싶으면 [protoTemplate.c](port/app/platform_handler/src/protoTemplate.c) 를 복사한다. 빌드되는 상태로 들어 있고 포트 세팅·DE 제어·AT 모드 양보·뱅크 등록이 되어 있으며, 채울 곳은 `protoTemplate_poll()` 안의 TODO 두 개뿐이다.
+| 예제 | 무엇을 보여주나 |
+|---|---|
+| [sensorUart.c](main/protocol/sensor_uart/sensorUart.c) — S/T/R | **상대가 먼저 보내는** 쪽. 들어온 한 줄을 파싱해 뱅크에 넣고 답을 돌려주는, 프로토콜이 할 일을 전부 갖춘 예제 |
+| [virtualDeviceProtocol.c](main/protocol/virtual_rs485/virtualDeviceProtocol.c) — Virtual RS-232 | **가장 짧은 완결 예제.** 뱅크에서 1행 예약 → 이름 등록 → 컬럼별 기록까지가 전부다. 드롭다운에 실제로 올라와 있어서, 웹에서 골라 동작까지 확인할 수 있다 |
+
+빈 골격에서 시작하고 싶으면 [protoTemplate.c](main/protocol/template/protoTemplate.c) 를 복사한다. 빌드되는 상태로 들어 있고 포트 세팅·DE 제어·AT 모드 양보·뱅크 등록이 되어 있으며, 채울 곳은 `protoTemplate_poll()` 안의 TODO 두 개뿐이다.
 
 > 두 파일 모두 웹 Mode 드롭다운에는 나오지 않는다. 드롭다운은
-> [serialProtocol.c](port/app/platform_handler/src/serialProtocol.c) 의 표 그대로이고,
+> [serialProtocol.c](main/protocol/manager/serialProtocol.c) 의 표 그대로이고,
 > 그 표는 **장비를 쓰는 사람이 고를 수 있는 것**만 담는다. 펌웨어를 고치는 사람에게만
 > 의미가 있는 항목은 넣지 않는다. 만든 프로토콜은 표에 **자기 이름으로** 추가한다.
 
@@ -1218,23 +1294,28 @@ snmp_notify_device(dev);      /* 그 디바이스의 모든 값 컬럼 */
 
 ### 체크리스트
 
-프로토콜이 존재한다는 사실은 **[serialProtocol.c](port/app/platform_handler/src/serialProtocol.c) 의 `g_serial_protocol[]` 한 곳**에만 적는다.
+프로토콜이 존재한다는 사실은 **[serialProtocol.c](main/protocol/manager/serialProtocol.c) 의 `g_serial_protocol[]` 한 곳**에만 적는다.
 태스크 생성·소유권 판정·웹 검증 상한·Mode 드롭다운이 전부 이 표에서 나온다.
 
-> ⚠ **행을 추가하기 전에 상한 두 개를 먼저 풀어라.**
-> [uartHandler.c:191](port/app/platform_handler/src/uartHandler.c#L191) 은 `sec_ups`(3),
-> [segcp.c:894](port/app/configuration/src/segcp.c#L894) 는 `modbus_ascii`(2) 를 상한으로
-> 갖고 있다. 드라이버는 부팅 시 그 위의 번호를 `protocol_none` 으로 덮어쓰므로,
-> 4번 이상으로 추가하면 구현을 다 해도 태스크가 뜨지 않는다.
-> 둘을 `serial_protocol_max_id()` 로 바꾸면 된다.
+> ⚠ **행을 추가하기 전에 드라이버의 상한을 먼저 확인하라.**
+> [uartHandler.c](port/app/platform_handler/src/uartHandler.c) 의 `serial_port_setup()` 은
+> 저장된 번호가 상한을 넘으면 `protocol_none` 으로 **조용히 덮어쓴다.** 지금 상한은
+> `protocol_custom`(4) 이고, [segcp.c](port/app/configuration/src/segcp.c) 는 아직
+> `modbus_ascii`(2) 다.
+>
+> 이게 실제로 물었던 적이 있다. Virtual RS-232 를 4번으로 등록했을 때 드라이버 상한이
+> `sec_ups`(3) 이어서, **웹 설정에는 Virtual RS-232 로 보이는데 포트는 Free 로 도는**
+> 상태가 됐다. 저장도 되고 화면도 맞는데 태스크만 안 뜨니 찾기 고약한 종류다.
+>
+> 5번 이상을 쓸 거면 두 상한을 `serial_protocol_max_id()` 로 바꿔라.
 
 | # | 파일 | 할 일 |
 |---|---|---|
 | 1 | [uartHandler.h](port/app/platform_handler/inc/uartHandler.h) `enum protocol` | 값 추가. `sec_ups`(3) 와 `protocol_custom`(4) 는 이미 있다 |
-| 2 | `platform_handler/{inc,src}/myproto.[ch]` | `protoTemplate.[ch]` 를 복사해서 이름만 바꾼다 |
-| 3 | [port/app/CMakeLists.txt](port/app/CMakeLists.txt) | `APP_PLATFORM_FILES` 의 `target_sources` 에 `.c` 추가 ([4.6](#46-소스-파일-추가-cmake-등록)) |
-| 4 | [serialProtocol.c](port/app/platform_handler/src/serialProtocol.c) `g_serial_protocol[]` | **한 줄 추가** — id, 표시 이름, 태스크, 스택, 우선순위 |
-| 5 | — | 값을 `device_setValue()` 로 device bank 에 쓴다 → SNMP·웹은 그대로 동작 |
+| 2 | **`main/protocol/<내이름>/myproto.[ch]`** | 폴더를 하나 만들고 [protoTemplate.[ch]](main/protocol/template/) 를 복사해 이름만 바꾼다 |
+| 3 | [port/app/CMakeLists.txt](port/app/CMakeLists.txt) | `.c` 를 `target_sources` 에, **새 폴더를 `target_include_directories` 에** ([4.6](#46-소스-파일-추가-cmake-등록)) |
+| 4 | [serialProtocol.c](main/protocol/manager/serialProtocol.c) `g_serial_protocol[]` | **한 줄 추가** — id, 표시 이름, 태스크, 스택, 우선순위 |
+| 5 | — | 값을 `device_bank_setValue()` 로 device bank 에 쓴다 → SNMP·웹·임계값 트랩이 그대로 동작 |
 
 ```c
 /* 4번은 이 한 줄이 전부다 */
@@ -1375,7 +1456,8 @@ xTaskCreate(my_task, "My_Task", MYTASK_STACK_SIZE, NULL, MYTASK_PRIORITY, NULL);
 
 | 새 파일 위치 | 등록할 타겟 | 등록 위치 |
 |---|---|---|
-| `port/app/platform_handler/src/*.c` | `APP_PLATFORM_FILES` | [port/app/CMakeLists.txt:190](port/app/CMakeLists.txt#L190) |
+| **`main/**/*.c`** (응용 계층 — 프로토콜·센서·서비스) | `APP_PLATFORM_FILES` | [port/app/CMakeLists.txt](port/app/CMakeLists.txt) |
+| `port/app/platform_handler/src/*.c` (드라이버) | `APP_PLATFORM_FILES` | 〃 |
 | `port/app/configuration/src/*.c` | `APP_CONFIG_FILES` | [:123](port/app/CMakeLists.txt#L123) |
 | `port/app/board/src/*.c` | `APP_BOARD_FILES` | [:105](port/app/CMakeLists.txt#L105) |
 | `port/app/serial_to_ethernet/src/*.c` | `APP_S2E_FILES` | [:164](port/app/CMakeLists.txt#L164) |
@@ -1383,20 +1465,25 @@ xTaskCreate(my_task, "My_Task", MYTASK_STACK_SIZE, NULL, MYTASK_PRIORITY, NULL);
 | `port/app/mbedtls/src/*.c` | `APP_MBEDTLS_FILES` | [:83](port/app/CMakeLists.txt#L83) |
 | `libraries/…` (서브모듈) | [libraries/CMakeLists.txt](libraries/CMakeLists.txt) 의 해당 라이브러리 | — |
 
+응용 계층 소스는 `${CMAKE_SOURCE_DIR}/main/...` 으로 적는다. 드라이버 계층의
+`${APP_PORT_DIR}/...` 과 접두사가 다르다.
+
 ```cmake
 target_sources(APP_PLATFORM_FILES PUBLIC
         ...
-        ${APP_PORT_DIR}/platform_handler/src/uartHandler.c
-        ${APP_PORT_DIR}/platform_handler/src/myproto.c      # ← 추가
+        ${CMAKE_SOURCE_DIR}/main/protocol/modbus/modbusMaster.c
+        ${CMAKE_SOURCE_DIR}/main/protocol/myproto/myproto.c   # ← 추가
 )
 ```
 
-**새 디렉터리**를 만들었다면 include 경로도 추가해야 한다:
+**프로토콜마다 폴더가 하나씩**이므로 새 프로토콜은 **항상** include 경로도 같이
+추가해야 한다. 이걸 빠뜨리면 `serialProtocol.c` 가 새 헤더를 못 찾는다.
 
 ```cmake
 target_include_directories(APP_PLATFORM_FILES PUBLIC
         ...
-        ${APP_PORT_DIR}/myproto/inc                          # ← 추가
+        ${CMAKE_SOURCE_DIR}/main/protocol/modbus
+        ${CMAKE_SOURCE_DIR}/main/protocol/myproto             # ← 추가
 )
 ```
 
@@ -1852,11 +1939,11 @@ cd ../..
 | `DEVCONFIG_EXT_MAGIC` | `0x57495A45` ('WIZE') | [ConfigData.h:200](port/app/configuration/inc/ConfigData.h#L200) |
 | `DEVCONFIG_EXT_VERSION` | 5 | [ConfigData.h:208](port/app/configuration/inc/ConfigData.h#L208) |
 | `DEVCONFIG_RESERVED_EXT_SIZE` | 29 | [ConfigData.h](port/app/configuration/inc/ConfigData.h) |
-| `DEVICE_COUNT` / `DEVICE_VALUE_COLS` | 64 / 3 | [sensor.h:31-32](port/app/platform_handler/inc/sensor.h#L31-L32) |
+| `DEVICE_COUNT` / `DEVICE_VALUE_COLS` | 64 / 3 | [sensor.h:31-32](main/device/sensor.h#L31-L32) |
 | `VALUE_LIMIT_CNT` | 4 | [ConfigData.h](port/app/configuration/inc/ConfigData.h) — 임계값을 담을 수 있는 컬럼 수 |
 | `TRAP_SCAN_SEC_DEFAULT` | 5 | 〃 — `trap_scan_sec` 가 0 일 때 |
-| `MODBUS_REG_COUNT` | `DEVICE_VALUE_COLS` (3) | [modbusMaster.h](port/app/platform_handler/inc/modbusMaster.h) |
-| `SNMP_TRAP_QUEUE_LEN` | 32 | [snmpHandler.c](port/app/platform_handler/src/snmpHandler.c) — 셀 단위 |
+| `MODBUS_REG_COUNT` | `DEVICE_VALUE_COLS` (3) | [modbusMaster.h](main/protocol/modbus/modbusMaster.h) |
+| `SNMP_TRAP_QUEUE_LEN` | 32 | [snmpHandler.c](main/service/snmp/snmpHandler.c) — 셀 단위 |
 | `DIN_COUNT` | 16 | [WIZnet_board.h](port/app/board/inc/WIZnet_board.h) — 이 보드만 정의 |
 | `MAX_OID` / `MAX_STRING` | 12 / 64 | [snmp.h:17-18](libraries/ioLibrary_Driver/Internet/SNMP/snmp.h#L17-L18) |
 | `SEG_DATA_BUF_SIZE` | 4096 | [seg.h:18](port/app/serial_to_ethernet/inc/seg.h#L18) |
