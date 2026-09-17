@@ -93,7 +93,7 @@ struct __serial_common {
 
 struct __serial_option {        // todo: [0] RS-232/TTL, [1] RS-422 [2] RS-485
     uint8_t uart_interface;     // UART interface; [0] TTL [1] RS-232 [2] RS-422 [3] RS-485, This value is determined at the initial routine of device.
-    uint8_t protocol;           // Serial communication protocol; [0] None, [1] Modbus RTU, [2] Modbus ASCII
+    uint8_t protocol;           // Serial communication protocol; the id of a row in g_serial_protocol[] (serialProtocol.c) -- listing the values here is what went stale twice
     uint8_t baud_rate;          // 0 ~ (enum)
     uint8_t data_bits;          // 7, 8, 9
     uint8_t parity;             // None, Odd, Even

@@ -192,12 +192,22 @@ void serial_port_setup(SerialPort *port) {
     /*  0 means unset, and GPIO0 is a UART TX pin so it can never be DE. */
     port->de_pin = (cfg_de != 0 && cfg_de <= 29) ? cfg_de : port->de_pin_board;
     port->intf = (cfg_intf > UART_IF_RS485_REVERSE) ? UART_IF_RS232_TTL : cfg_intf;
-    /*  protocol_custom (4) is a real application protocol registered in
-        serialProtocol.c.  Comparing against sec_ups (3) silently converted
-        it to protocol_none, so the web setting showed Virtual RS-232 while
-        the runtime status showed Free. */
-    port->protocol = (serial_option->protocol > protocol_custom)
-                     ? protocol_none : serial_option->protocol;
+    /*  Carried through as stored. Do not clamp it here.
+
+        This line used to cap the value at the highest protocol that existed
+        when it was written, and every protocol added after that was silently
+        turned into protocol_none -- the web showed the setting the operator
+        chose while the port ran Free. It has happened twice now: first with
+        protocol_custom, then with hvac_modbus. A constant that has to be
+        bumped whenever the registry grows is exactly what the registry was
+        built to get rid of.
+
+        Nothing downstream needs the clamp. Every reader of this field goes
+        through serial_protocol_find() or serial_protocol_has_handler(), both
+        of which answer "nobody claims that value" for an id the registry does
+        not hold -- so an unknown id starts no task and leaves the port with
+        sensorUart, which is what the clamp was arranging the long way round. */
+    port->protocol = serial_option->protocol;
     uint8_t intf = port->intf;
     uint8_t tx_pin = port->tx_pin;
     uint8_t rx_pin = port->rx_pin;
