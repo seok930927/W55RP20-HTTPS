@@ -1,7 +1,12 @@
 /*  CN10 / CN11 contact inputs — see digitalInput.h.
 
-    Reads sixteen GPIO lines and publishes each as one device-bank row, which
-    is all it takes for a value to reach the web page and SNMP.  */
+    Reads sixteen GPIO lines and publishes each as one item bank number, which
+    is all it takes for a value to reach the web page and SNMP.
+
+    The numbers are 111 to 126 and they are the customer's, not ours: their
+    document says "접점 상태값은 111 부터 16개". That puts the contacts in the
+    same flat number space as the HVAC unit's own items (1-76, 100), under
+    1.3.6.1.4.1.22210.2.1.<번호>.0, which is what they asked for.  */
 
 #include <stdio.h>
 
@@ -12,8 +17,7 @@
 #include "task.h"
 
 #include "digitalInput.h"
-#include "sensor.h"             /* device_bank_reserve, device_setValue      */
-#include "snmpHandler.h"        /* snmp_notify_device                        */
+#include "itemBank.h"           /* item_bank_register, item_set              */
 #include "WIZnet_board.h"       /* DIN_COUNT, DIN_PINS, DIN_PINS_IN_USE      */
 #include "WIZ5XXSR-RP_Debug.h"  /* PRT_INFO                                  */
 
@@ -37,10 +41,8 @@ void digitalInput_task(void *argument) {
 
 #else
 
-/*  Which value column the state goes in. The bank's columns are shared by
-    every device (see sensor.h), so this rides in the alarm column rather
-    than getting one of its own -- a column costs every row, not just these. */
-#define DIN_VALUE_COL       2
+/*  Terminal 0 is number 111, terminal 1 is 112, and so on to 126. */
+#define DIN_ITEM_BASE       111
 
 /*  What the panel shows, not what the pin reads: a closed contact is a
     healthy sensor. */
@@ -50,6 +52,14 @@ void digitalInput_task(void *argument) {
 #define DIN_POLL_PERIOD     200     /* ms between sweeps                     */
 
 static const uint8_t s_pins[DIN_COUNT] = DIN_PINS;
+
+/*  The item table is filled in at init rather than written out as a literal,
+    because each name carries the pin behind the terminal and the pin map is a
+    board header. It has to outlive init: item_bank_register() keeps the
+    pointer and never copies, so neither the table nor the names can be local
+    to a function. */
+static char    s_name[DIN_COUNT][16];
+static ItemDef s_item[DIN_COUNT];
 
 #ifdef DIN_PINS_IN_USE
 static const uint8_t s_in_use[] = DIN_PINS_IN_USE;
@@ -76,29 +86,25 @@ static int din_pin_taken(uint8_t pin) {
 }
 
 int digitalInput_init(void) {
-    int base = device_bank_reserve(DIN_COUNT, DEVICE_SRC_CONTACT);
     int skipped = 0;
-
-    if (base < 0) {
-        PRT_INFO("digitalInput: no room in the device bank\r\n");
-        return base;
-    }
-    /*  Terminal number is the index into the block from here on -- the base is
-        only used for the log line below. */
+    int rc;
 
     for (int i = 0; i < DIN_COUNT; i++) {
-        char name[DEVICE_NAME_MAX];
-
         /*  The name carries the terminal number and the pin behind it, so the
             web page can lay the inputs out the way the connector is wired
             without keeping its own copy of the pin map. Terminal numbering
             starts at zero to match the board drawing.
 
-            The row is claimed either way, so the numbering stays put whether
-            or not a given pin is available yet -- freeing a pin later must
-            not shift every input after it. */
-        snprintf(name, sizeof(name), "IO%d GP%u", i, s_pins[i]);
-        device_bank_assign(DEVICE_SRC_CONTACT, (uint8_t)i, name);
+            The number is claimed either way, so the numbering stays put
+            whether or not a given pin is available yet -- freeing a pin later
+            must not shift every input after it. */
+        snprintf(s_name[i], sizeof(s_name[i]), "IO%d GP%u", i, s_pins[i]);
+
+        s_item[i].num     = (uint8_t)(DIN_ITEM_BASE + i);
+        s_item[i].name    = s_name[i];
+        s_item[i].scale   = 0;
+        s_item[i].unit    = "";
+        s_item[i].trap_on = DIN_STATE_ALARM;
         s_last[i] = 0;
 
         if (din_pin_taken(s_pins[i])) {
@@ -110,9 +116,18 @@ int digitalInput_init(void) {
         gpio_pull_up(s_pins[i]);        /* open terminal reads high = alarm */
     }
 
-    PRT_INFO("digitalInput: %d inputs at rows %d..%d (%d pin(s) still in use "
-             "elsewhere, skipped)\r\n",
-             DIN_COUNT, base, base + DIN_COUNT - 1, skipped);
+    /*  A second table on the HVAC device, alongside whatever the protocol on
+        that port registered. The numbers do not overlap, which the bank
+        checks rather than trusts. */
+    rc = item_bank_register(ITEM_DEV_HVAC, s_item, DIN_COUNT);
+    if (rc < 0) {
+        PRT_INFO("digitalInput: item table rejected (%d)\r\n", rc);
+        return rc;
+    }
+
+    PRT_INFO("digitalInput: %d inputs at numbers %d..%d (%d pin(s) still in "
+             "use elsewhere, skipped)\r\n",
+             DIN_COUNT, DIN_ITEM_BASE, DIN_ITEM_BASE + DIN_COUNT - 1, skipped);
     return 0;
 }
 
@@ -131,9 +146,12 @@ int digitalInput_poll(void) {
             continue;
         }
         s_last[i] = state;
-        device_bank_setValue(DEVICE_SRC_CONTACT, (uint8_t)i,
-                             DIN_VALUE_COL, (int32_t)state);
-        snmp_notify_device((uint8_t)device_bank_row(DEVICE_SRC_CONTACT, (uint8_t)i));
+
+        /*  No trap call here. The agent watches every item against its
+            ItemDef.trap_on and fires once on the way in, so a line going to
+            alarm reports itself -- and a line coming back does not, which is
+            what "트랩 한번 발생" asks for. */
+        item_set(ITEM_DEV_HVAC, (uint8_t)(DIN_ITEM_BASE + i), (int32_t)state);
         changed++;
 
         PRT_INFO("digitalInput: IN-%d (GP%u) -> %s\r\n",
