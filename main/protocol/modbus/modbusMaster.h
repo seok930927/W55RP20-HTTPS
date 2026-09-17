@@ -51,9 +51,28 @@ void modbusMaster_init(SerialPort *port);
     to match rather than patching a count in here. */
 #define MODBUS_REG_COUNT    DEVICE_VALUE_COLS
 
+/*  Read `count` registers starting at `addr` from one slave.
+
+    `func` is 0x03 (holding) or 0x04 (input) -- which one a device wants is the
+    device's business, and this firmware talks to both. The reply goes into the
+    caller's `rsp` buffer, which must hold 5 + 2*count bytes; passing it in
+    rather than declaring it here is what lets an 87-register read live
+    somewhere other than this file's stack.
+
+    On success fills out[0 .. count-1] with the raw registers, big-endian as
+    Modbus sends them. Negative on error:
+      -1 timeout / short frame, -2 CRC error, -3 unexpected header,
+      -4 the request or the buffer is out of range.
+
+    How long it waits is worked out from the port's baud rate and the reply
+    length, because a fixed wait that suits an 11-byte frame is shorter than a
+    179-byte frame takes to arrive at 9600. */
+int modbus_read_regs(SerialPort *port, uint8_t slave, uint8_t func,
+                     uint16_t addr, uint8_t count,
+                     uint8_t *rsp, int rsp_cap, int16_t *out);
+
 /*  Poll one slave. On success fills out[0 .. MODBUS_REG_COUNT-1] with the raw
-    register values in device-bank column order. Negative on error:
-      -1 timeout / short frame, -2 CRC error, -3 unexpected header. */
+    register values in device-bank column order. Same error codes as above. */
 int modbus_read_values(SerialPort *port, uint8_t slave, int16_t *out);
 
 /*  FreeRTOS task: periodically polls the configured slave range and writes

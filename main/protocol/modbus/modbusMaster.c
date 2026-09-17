@@ -31,7 +31,9 @@ extern uint32_t baud_table[];
 /* slave, func, byte count, MODBUS_REG_COUNT registers, CRC16 */
 #define MODBUS_RSP_LEN       (5 + 2 * MODBUS_REG_COUNT)
 
-#define MODBUS_RSP_TIMEOUT   150    /* ms to wait for a full response frame      */
+/*  What a slave is allowed to take before it starts answering. The time the
+    frame itself spends on the wire is added on top -- see rsp_timeout_ms(). */
+#define MODBUS_RSP_TURNAROUND 150   /* ms of slack on top of the wire time       */
 #define MODBUS_POLL_PERIOD   1000   /* ms between full poll cycles               */
 
 /*  The request carries the register quantity in a byte and the reply its byte
@@ -72,12 +74,43 @@ static const char *hexdump(char *buf, size_t cap, const uint8_t *p, int len) {
     return buf;
 }
 
-int modbus_read_values(SerialPort *port, uint8_t slave, int16_t *out) {
-    /*  Request: read MODBUS_REG_COUNT input registers (Func 04) from address
-        0x0000. The quantity is 16-bit on the wire; the static assert above
-        keeps it inside the low byte. */
-    uint8_t req[8] = { slave, 0x04, 0x00, 0x00, 0x00, MODBUS_REG_COUNT, 0x00, 0x00 };
-    uint16_t crc = usMBCRC16(req, 6);
+/*  A reply cannot arrive faster than the line carries it: `want` bytes at ten
+    bits each. Waiting a fixed 150 ms suits the 11-byte frame this file started
+    with and is already short of what 179 bytes need at 9600, so the wire time
+    is worked out instead of guessed. */
+static uint32_t rsp_timeout_ms(SerialPort *port, int want) {
+    uint32_t baud = baud_table[(port->opt && port->opt->baud_rate < baud_max)
+                               ? port->opt->baud_rate : baud_9600];
+
+    if (baud == 0) {
+        baud = 9600;
+    }
+    return MODBUS_RSP_TURNAROUND + ((uint32_t)want * 10u * 1000u) / baud;
+}
+
+int modbus_read_regs(SerialPort *port, uint8_t slave, uint8_t func,
+                     uint16_t addr, uint8_t count,
+                     uint8_t *rsp, int rsp_cap, int16_t *out) {
+    uint8_t req[8];
+    uint16_t crc;
+    int want = 5 + 2 * (int)count;
+    int n;
+    char txs[3 * sizeof(req) + 1];
+
+    if (count == 0 || count > 125 || rsp == NULL || out == NULL
+            || rsp_cap < want) {
+        return -4;
+    }
+
+    /*  The quantity is 16-bit on the wire, and `count` being a byte is what
+        keeps it inside the low half. */
+    req[0] = slave;
+    req[1] = func;
+    req[2] = (uint8_t)(addr >> 8);
+    req[3] = (uint8_t)(addr & 0xFF);
+    req[4] = 0x00;
+    req[5] = count;
+    crc = usMBCRC16(req, 6);
     req[6] = (uint8_t)(crc & 0xFF);   /* Modbus CRC: low byte first */
     req[7] = (uint8_t)(crc >> 8);
 
@@ -89,35 +122,41 @@ int modbus_read_values(SerialPort *port, uint8_t slave, int16_t *out) {
         and RS-422. */
     serial_port_puts(port, req, sizeof(req));
 
-    uint8_t rsp[MODBUS_RSP_LEN];
     /*  The reply length is known because we chose the request, which is the
         one framing a master never has to hunt for. */
-    int n = serial_port_read_exact(port, rsp, MODBUS_RSP_LEN, MODBUS_RSP_TIMEOUT);
-    char txs[3 * sizeof(req) + 1];
-    char rxs[3 * MODBUS_RSP_LEN + 1];
+    n = serial_port_read_exact(port, rsp, want, rsp_timeout_ms(port, want));
 
-    /* DIAG: show what we sent and what (if anything) came back. */
-    PRT_INFO("modbus ch%d TX: %s | RX %d bytes: %s\r\n",
+    /*  The frame itself is not dumped here any more: at 87 registers the hex
+        would be 500-odd characters on every poll. What went out is enough to
+        tell a silent bus from a wrong reply, and the return code says which
+        check the reply failed. */
+    PRT_INFO("modbus ch%d TX: %s | RX %d/%d bytes\r\n",
              port->channel,
-             hexdump(txs, sizeof(txs), req, (int)sizeof(req)),
-             n, hexdump(rxs, sizeof(rxs), rsp, n));
+             hexdump(txs, sizeof(txs), req, (int)sizeof(req)), n, want);
 
-    if (n != MODBUS_RSP_LEN) {
+    if (n != want) {
         return -1;                               /* timeout / short frame */
     }
-    if (usMBCRC16(rsp, MODBUS_RSP_LEN) != 0) {
+    if (usMBCRC16(rsp, (uint16_t)want) != 0) {
         return -2;                               /* CRC mismatch */
     }
-    if (rsp[0] != slave || rsp[1] != 0x04
-            || rsp[2] != (uint8_t)(2 * MODBUS_REG_COUNT)) {
+    if (rsp[0] != slave || rsp[1] != func || rsp[2] != (uint8_t)(2 * count)) {
         return -3;                               /* wrong addr/func/bytecount */
     }
 
-    /* Register n -> value column n, big-endian as Modbus sends them. */
-    for (uint8_t i = 0; i < MODBUS_REG_COUNT; i++) {
+    /* Register n, big-endian as Modbus sends them. */
+    for (uint8_t i = 0; i < count; i++) {
         out[i] = (int16_t)(((uint16_t)rsp[3 + 2 * i] << 8) | rsp[4 + 2 * i]);
     }
     return 0;
+}
+
+int modbus_read_values(SerialPort *port, uint8_t slave, int16_t *out) {
+    uint8_t rsp[MODBUS_RSP_LEN];
+
+    /*  Input registers (Func 04) from address 0x0000, one per value column. */
+    return modbus_read_regs(port, slave, 0x04, 0x0000, MODBUS_REG_COUNT,
+                            rsp, (int)sizeof(rsp), out);
 }
 
 void modbusMaster_task(void *argument) {
