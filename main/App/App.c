@@ -27,6 +27,9 @@
 #include "snmpHandler.h"
 #include "segcp.h"
 #include "sensor.h"
+#include "itemBank.h"         /* flat number-addressed value store */
+#include "hvacModbus.h"       /* hvacModbus_register */
+#include "secUps.h"           /* secUps_register     */
 #include "sensorUart.h"
 #include "serialProtocol.h"   /* protocol registry: task table */
 #include "digitalInput.h"     /* CN10/CN11 contact inputs      */
@@ -314,6 +317,24 @@ void start_task(void *argument) {
     xTaskCreate(segcp_tcp_task, "SEGCP_tcp_Task", SEGCP_TCP_TASK_STACK_SIZE, NULL, SEGCP_TCP_TASK_PRIORITY, NULL);
     xTaskCreate(segcp_serial_task, "SEGCP_serial_Task", SEGCP_SERIAL_TASK_STACK_SIZE, NULL, SEGCP_SERIAL_TASK_PRIORITY, NULL);
     xTaskCreate(sensorUart_task, "Sensor_UART_Task", SENSOR_UART_TASK_STACK_SIZE, NULL, SENSOR_UART_TASK_PRIORITY, NULL);
+    /*  Before the protocol tasks, not after: clearing the bank afterwards
+        would throw their registrations away. */
+    item_bank_init();
+
+    /*  Every item this unit can publish, whether or not the protocol that
+        fills it is running.
+
+        The numbers and names are fixed at compile time -- this product is one
+        HVAC unit and one UPS -- so nothing about them depends on which
+        protocol a port is set to, or on anything being plugged in. Registering
+        them here is what makes the OIDs exist from boot, and registering an
+        OID in a management program is something people do before the
+        equipment is wired. Left to the protocol tasks, an unconfigured port
+        meant the OIDs did not exist at all, which reads as "no such item"
+        rather than "no reading yet". */
+    hvacModbus_register();
+    secUps_register();
+
     /*  Whatever each port is set to, started from the one table that knows
         about it. Ports with no handler of their own stay with sensorUart. */
     for (uint8_t p = 0; p < SERIAL_PORT_CNT; p++) {

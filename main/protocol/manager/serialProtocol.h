@@ -5,6 +5,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "uartHandler.h"   /* SerialPort, enum protocol */
+#include "itemBank.h"      /* ITEM_DEV_*                */
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,7 +32,20 @@ typedef struct {
     TaskFunction_t  task;       /* NULL: no task, sensorUart keeps the port  */
     uint16_t        stack;      /* words, as xTaskCreate takes them          */
     UBaseType_t     priority;   /* keep at or below 31 (configMAX_PRIORITIES) */
+
+    /*  Which item bank device this protocol fills, or -1 for one that does
+        not use the item bank at all.
+
+        The web page needs it. Each serial port gets its own screens, and what
+        those screens look like depends on the equipment behind the port -- a
+        UPS gets three, the HVAC unit two, and the cells are laid out by that
+        equipment's own numbering. The page cannot work that out from a
+        protocol name, and it should not have to: the binding is right here,
+        next to the task that does the filling. */
+    int8_t          item_dev;   /* ITEM_DEV_*, or -1                         */
 } SerialProtocol;
+
+#define SERIAL_PROTO_NO_ITEM    (-1)
 
 extern const SerialProtocol g_serial_protocol[];
 extern const uint8_t        g_serial_protocol_cnt;

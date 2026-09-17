@@ -100,7 +100,8 @@ enum protocol {
     modbus_rtu = 1,
     modbus_ascii = 2,
     sec_ups = 3,
-    protocol_custom = 4   /* protoTemplate.c — copy it to add your own */
+    protocol_custom = 4,  /* protoTemplate.c — copy it to add your own */
+    hvac_modbus = 5       /* 항온항습기. Modbus RTU 위에 얹은 항목표      */
 };
 
 /*  A serial port, as this firmware uses one.

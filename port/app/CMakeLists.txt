@@ -200,12 +200,15 @@ target_sources(APP_PLATFORM_FILES PUBLIC
         ${CMAKE_SOURCE_DIR}/main/service/snmp/snmpHandler.c
         ${CMAKE_SOURCE_DIR}/main/service/snmp/snmpBuffer.c
         ${CMAKE_SOURCE_DIR}/main/device/sensor.c
+        ${CMAKE_SOURCE_DIR}/main/device/itemBank.c
         ${CMAKE_SOURCE_DIR}/main/protocol/sensor_uart/sensorUart.c
         ${CMAKE_SOURCE_DIR}/main/protocol/modbus/modbusMaster.c
         ${CMAKE_SOURCE_DIR}/main/protocol/template/protoTemplate.c
         ${CMAKE_SOURCE_DIR}/main/input/digitalInput.c
         ${CMAKE_SOURCE_DIR}/main/protocol/manager/serialProtocol.c
         ${CMAKE_SOURCE_DIR}/main/protocol/virtual_rs485/virtualDeviceProtocol.c
+        ${CMAKE_SOURCE_DIR}/main/protocol/sec_ups/secUps.c
+        ${CMAKE_SOURCE_DIR}/main/protocol/hvac/hvacModbus.c
         ${APP_PORT_DIR}/platform_handler/src/spiHandler.c
         ${APP_PORT_DIR}/platform_handler/src/storageHandler.c
         ${APP_PORT_DIR}/platform_handler/src/timerHandler.c
@@ -222,6 +225,8 @@ target_include_directories(APP_PLATFORM_FILES PUBLIC
         ${CMAKE_SOURCE_DIR}/main/protocol/modbus
         ${CMAKE_SOURCE_DIR}/main/service/snmp
         ${CMAKE_SOURCE_DIR}/main/protocol/virtual_rs485
+        ${CMAKE_SOURCE_DIR}/main/protocol/sec_ups
+        ${CMAKE_SOURCE_DIR}/main/protocol/hvac
         ${APP_PORT_DIR}/html_file
         ${APP_PORT_DIR}/serial_to_ethernet/inc
         ${APP_PORT_DIR}/aws-iot-device-sdk-embedded-C/inc

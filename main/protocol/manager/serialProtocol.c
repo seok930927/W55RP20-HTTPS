@@ -5,6 +5,8 @@
 #include "modbusMaster.h"       /* modbusMaster_task                         */
 #include "WIZ5XXSR-RP_Debug.h"  /* PRT_INFO                                  */
 #include "virtualDeviceProtocol.h"
+#include "secUps.h"             /* secUps_task                               */
+#include "hvacModbus.h"         /* hvacModbus_task                           */
 
 /*  One row per protocol. Order does not matter; the id is what binds a row to
     the value stored in serial_option.protocol.
@@ -14,11 +16,11 @@
     actually implements, and nothing else.
 
     A row is not a promise to build something -- it is a report that something
-    is built. modbus_ascii and sec_ups have ids in enum protocol but no rows,
-    because neither has a handler; listing them would let an operator select a
-    protocol that silently does not run. protocol_custom has no row for the
-    same kind of reason: it means something to whoever extends the firmware,
-    not to whoever operates the device.
+    is built. modbus_ascii has an id in enum protocol but no row, because it
+    has no handler; listing it would let an operator select a protocol that
+    silently does not run. protocol_custom keeps a row only as long as the
+    example it points at does: it means something to whoever extends the
+    firmware, not to whoever operates the device.
 
     A NULL task means sensorUart keeps the port and parses S/T/R on it, which
     is what protocol_none is -- S/T/R is implemented, so its row stays.
@@ -26,9 +28,11 @@
     Adding a protocol: write it, register the .c, add a row here under its own
     name. See APP_DEV_GUIDE.md chapter 4.4.  */
 const SerialProtocol g_serial_protocol[] = {
-    { protocol_none,   "Free",         NULL,               0,    0 },
-    { modbus_rtu,      "Modbus RTU",   modbusMaster_task,  1024, 9 },
-    { protocol_custom, "Virtual RS-232", virtual_device_task, 1024, 9 },
+    { protocol_none,   "Free",           NULL,                0,    0, SERIAL_PROTO_NO_ITEM },
+    { modbus_rtu,      "Modbus RTU",     modbusMaster_task,   1024, 9, SERIAL_PROTO_NO_ITEM },
+    { protocol_custom, "Virtual RS-232", virtual_device_task, 1024, 9, SERIAL_PROTO_NO_ITEM },
+    { sec_ups,         "SEC UPS",        secUps_task,         1024, 9, ITEM_DEV_UPS },
+    { hvac_modbus,     "HVAC",           hvacModbus_task,     1024, 9, ITEM_DEV_HVAC },
 };
 
 const uint8_t g_serial_protocol_cnt =
