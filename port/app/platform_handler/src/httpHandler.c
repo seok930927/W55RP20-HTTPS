@@ -14,6 +14,7 @@
 #include "deviceHandler.h"
 #include "snmpBuffer.h"
 #include "sensor.h"
+#include "itemBank.h"
 #include "ConfigData.h"
 #include "snmpHandler.h"
 #include "serialProtocol.h"   /* protocol registry */
@@ -312,9 +313,14 @@ static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
           "columns":[{"name":"Temperature","unit":"C","scale":-1}, ...],
           "ports":[{"ch":0,"if":"TTL/RS-232","proto":"Modbus RTU",
                     "baud":115200,"bits":8,"par":"N","stop":1,
-                    "tx":4,"rx":5,"de":255}, ...],
+                    "tx":4,"rx":5,"de":255,"idev":-1}, ...],
           "devices":[
             {"index":1,"name":"...","src":0,"values":[235,600,0]},
+            ...
+          ],
+          "items":[
+            {"dev":0,"oid":1,"num":3,"name":"현재온도","unit":"C",
+             "scale":-1,"trap":0,"val":222},
             ...
           ],
           "comm":{"status":..,"recv_cs":..,"calc_cs":..,"check":..,"flag":..}
@@ -393,7 +399,7 @@ static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
         n = snprintf(chunk, sizeof(chunk),
                      "%s{\"ch\":%d,\"if\":\"%s\",\"proto\":\"%s\","
                      "\"baud\":%lu,\"bits\":%u,\"par\":\"%s\",\"stop\":%u,"
-                     "\"tx\":%u,\"rx\":%u,\"de\":%u}",
+                     "\"tx\":%u,\"rx\":%u,\"de\":%u,\"idev\":%d}",
                      first ? "" : ",",
                      sp->channel,
                      (const char *)uart_if_table[(sp->intf <= SPI_IF_SLAVE)
@@ -406,7 +412,11 @@ static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
                                                 ? so->parity : parity_none],
                      (unsigned)stop_bit_table[(so->stop_bits <= stop_bit2)
                                               ? so->stop_bits : stop_bit1],
-                     sp->tx_pin, sp->rx_pin, de);
+                     sp->tx_pin, sp->rx_pin, de,
+                     /*  Which equipment sits behind this port, so the page
+                         can draw that equipment's own screens for it. -1 is
+                         a protocol that publishes nothing to the item bank. */
+                     pr ? (int)pr->item_dev : SERIAL_PROTO_NO_ITEM);
         if (n <= 0 || n >= (int)sizeof(chunk)) {
             continue;                /* overflow -- skip this port */
         }
@@ -453,7 +463,50 @@ static int https_send_sensor_json(wiz_tls_context *tls_ctx) {
         first = 0;
     }
 
-    /* Close devices array + comm object */
+    /*  One chunk per flat item (itemBank.h).
+
+        These are not device-bank rows and do not fit the columns above: each
+        one is a number with its own name, unit and scale, so it carries them
+        itself. "oid" is the device sub-identifier, not the slot -- the page
+        prints 22210.2.<oid>.<num>.0 and that is the OID a manager will use. */
+    n = snprintf(chunk, sizeof(chunk), "],\"items\":[");
+    if (https_send_http_chunk(tls_ctx, chunk, (size_t)n) < 0) {
+        return -1;
+    }
+    first = 1;
+
+    for (uint8_t idev = 0; idev < ITEM_DEV_CNT; idev++) {
+        uint16_t icnt = item_count(idev);
+
+        for (uint16_t i = 0; i < icnt; i++) {
+            const ItemDef *def = item_at(idev, i);
+            int32_t val = 0;
+
+            if (def == NULL) {
+                continue;
+            }
+            (void)item_get(idev, def->num, &val);
+
+            n = snprintf(chunk, sizeof(chunk),
+                         "%s{\"dev\":%u,\"oid\":%lu,\"num\":%u,\"name\":\"%s\","
+                         "\"unit\":\"%s\",\"scale\":%d,\"trap\":%u,"
+                         "\"val\":%ld}",
+                         first ? "" : ",",
+                         idev, (unsigned long)item_oid_device(idev), def->num,
+                         def->name ? def->name : "",
+                         def->unit ? def->unit : "",
+                         def->scale, def->trap_on, (long)val);
+            if (n <= 0 || n >= (int)sizeof(chunk)) {
+                continue;   /* overflow — skip this entry */
+            }
+            if (https_send_http_chunk(tls_ctx, chunk, (size_t)n) < 0) {
+                return -1;
+            }
+            first = 0;
+        }
+    }
+
+    /* Close items array + comm object */
     uint32_t cs_status, cs_recv, cs_calc, cs_check, cs_flag;
     snmpBuffer_getCommFields(&cs_status, &cs_recv, &cs_calc, &cs_check, &cs_flag);
     n = snprintf(chunk, sizeof(chunk),
@@ -549,10 +602,10 @@ typedef struct {
 #define CFG_RAW(key, ptr, w, sgn, zok, mn, mx, dv) \
     { key, (uint8_t)(w), (uint8_t)(zok), (uint8_t)(sgn), (void *)(ptr), mn, mx, dv }
 
-/*  18 named rows, plus three per value column (use / low / high) and the two
+/*  21 named rows, plus three per value column (use / low / high) and the two
     trap periods. Sized on VALUE_LIMIT_CNT rather than DEVICE_VALUE_COLS so the
     array still fits if the column list grows to what the config can hold. */
-#define CFG_NUM_CNT  (18 + 3 * VALUE_LIMIT_CNT + 2)
+#define CFG_NUM_CNT  (21 + 3 * VALUE_LIMIT_CNT + 2)
 
 /*  Filled per call rather than declared const: &conf->x is not a constant
     expression, and serial_mode's upper bound comes from the protocol registry
@@ -597,6 +650,13 @@ static int cfg_num_table(DevConfig *conf, CfgNum *t, int cap) {
     CFG_ADD(CFG_NUM  ("serial485_parity", serial_option_485.parity,       0, 4,  0));
     CFG_ADD(CFG_NUM  ("serial485_flow",   serial_option_485.flow_control, 0, 4,  0));
     CFG_ADD(CFG_NUM  ("serial485_mode",   serial_option_485.protocol,     0, proto_max, 0));
+
+    /*  UPS 제어 (고객 문서 슬라이드 13). 0 은 "아직 설정 안 함" 이라 각자의
+        기본값으로 읽히므로 CFG_NUM_Z 를 쓴다 -- 기존 유닛이 올라와도 화면이
+        빈 칸이 아니라 3상 / 통신으로 뜬다. */
+    CFG_ADD(CFG_NUM_Z("ups_phase",        ups_phase,        1, 3,   UPS_PHASE_DEFAULT));
+    CFG_ADD(CFG_NUM_Z("ups_batt_src",     ups_batt_src,     1, 2,   UPS_BATT_SRC_DEFAULT));
+    CFG_ADD(CFG_NUM  ("ups_batt_count",   ups_batt_count,   0, 255, 0));
 
     /*  Trap thresholds, one set per value column.
 

@@ -266,8 +266,16 @@ static inline void value_limit_set(uint8_t p[2], int16_t v) {
              - serial485_de_pin(1) - serial_de_pin(1) - snmp_community(16)
              - trap_community(16) - snmp_perm(1) - trap_disable(1)
              - value_limit(5 x VALUE_LIMIT_CNT = 20) - trap_scan_sec(1)
-             - trap_repeat_sec(1). */
-#define DEVCONFIG_RESERVED_EXT_SIZE    29
+             - trap_repeat_sec(1) - ups_phase(1) - ups_batt_src(1)
+             - ups_batt_count(1). */
+#define DEVCONFIG_RESERVED_EXT_SIZE    26
+
+/*  UPS 제어 기본값. 0 이 저장돼 있으면(설정한 적 없으면) 이 값으로 읽는다. */
+#define UPS_PHASE_SINGLE          1       /* 단상   */
+#define UPS_PHASE_THREE_ONE       2       /* 3-1상  */
+#define UPS_PHASE_THREE           3       /* 3상    */
+#define UPS_PHASE_DEFAULT         UPS_PHASE_THREE
+#define UPS_BATT_SRC_DEFAULT      1       /* 통신   */
 
 /* Service port defaults / bounds (0 stored => use default at runtime). */
 #define HTTPS_PORT_DEFAULT        443
@@ -345,6 +353,22 @@ typedef struct __DevConfig {
     struct __value_limit value_limit[VALUE_LIMIT_CNT];
     uint8_t  trap_scan_sec;    /* bank sweep period, s; 0 => TRAP_SCAN_SEC_DEFAULT */
     uint8_t  trap_repeat_sec;  /* re-report while still outside; 0 => once per crossing */
+
+    /*  ── UPS 제어 (고객 문서 슬라이드 13) ──
+
+        조회가 아니라 조작 화면이다. 운전원이 셋을 적어 넣고, 그중 상수는 화면
+        구성까지 바꾼다 -- 단상이면 3상 데이터 화면이 메뉴에서 빠진다.
+
+        셋 다 한 바이트다. DevConfig 는 packed 라서 홀수 오프셋에 16비트를 두면
+        Cortex-M0+ 가 정렬되지 않은 LDRH 로 HardFault 를 낸다. 값의 범위가
+        바이트에 들어가므로 바이트로 둔다.
+
+        0 은 "아직 설정 안 함" 이다. 기존 유닛은 reserved_ext 가 0 이라 그대로
+        올라오고, 읽는 쪽이 0 을 기본값으로 바꿔 쓴다. */
+    uint8_t  ups_phase;        /* 단상(1) / 3-1상(2) / 3상(3); 0 => 3       */
+    uint8_t  ups_batt_src;     /* 축전지 상태: 통신(1) / 입력전원(2); 0 => 1 */
+    uint8_t  ups_batt_count;   /* 축전지 수량 [EA], 출력단상용; 0 => 미설정  */
+
     uint8_t reserved_ext[DEVCONFIG_RESERVED_EXT_SIZE];
 } __attribute__((packed)) DevConfig;
 

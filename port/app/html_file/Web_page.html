@@ -105,6 +105,35 @@ th {
     width: 44px;
     color: #777;
 }
+/* 시리얼 아래 붙는 장비 화면 목록 */
+.menu .sub-list { list-style: none; margin: 0; padding: 0; }
+.menu .sub-list li {
+    padding-left: 34px;
+    font-size: 12px;
+    color: #555;
+}
+.menu .sub-list li::before { content: "- "; color: #888; }
+.menu .sub-list li.active { color: #000; font-weight: bold; }
+/* PPT 화면을 그대로 옮긴 표 */
+.scr-table { width: 100%; margin-bottom: 10px; }
+.scr-table th, .scr-table td { font-size: 12px; padding: 3px 5px; }
+.scr-table .scr-head { background: #eef1f4; font-weight: bold; }
+.scr-table .scr-label { background: #f7f8f9; text-align: center; }
+.scr-alarm { color: #c00; font-weight: bold; }
+
+/* flat item tables — one per device, drawn on every device page */
+.item-table {
+    width: 100%;
+    margin-bottom: 10px;
+}
+.item-table th, .item-table td {
+    font-size: 12px;
+    padding: 3px 5px;
+}
+.item-table .col-idx {
+    width: 44px;
+    color: #777;
+}
 /* contact-input blocks, laid out like the CN10/CN11 terminals */
 .din-wrap {
     display: flex;
@@ -396,9 +425,12 @@ th {
     <nav class="topnav">
         <ul class="menu">
             <li>현재상태</li>
-            <li id="menu-sensor" class="sub active" onclick="showSensor('device')">온습도및입력 1</li>
-            <li id="menu-sensor2" class="sub" onclick="showSensor('device2')">온습도및입력 2</li>
-            <li id="menu-comm" class="sub" onclick="showSensor('comm')">통신데이타</li>
+            <li id="menu-ser0" class="sub active" onclick="showSerial(0)">시리얼 1</li>
+            <ul class="menu sub-list" id="submenu-ser0"></ul>
+            <li id="menu-ser1" class="sub" onclick="showSerial(1)">시리얼 2</li>
+            <ul class="menu sub-list" id="submenu-ser1"></ul>
+            <li id="menu-din" class="sub" onclick="showDin()">접점 입력</li>
+            <li id="menu-comm" class="sub" onclick="showComm()">통신데이타</li>
             <li id="menu-network" onclick="showTab('config')">네트워크환경</li>
             <li id="menu-config" onclick="showTab('setup')">환경설정</li>
         </ul>
@@ -407,27 +439,18 @@ th {
     <main class="content">
         <!-- 디바이스 탭 -->
         <div id="tab-sensor">
-            <!-- 온습도및입력 -->
-            <div id="view-device">
-                <div class="content-header">[ 온습도 센서 및 입출력데이터 ]</div>
-                <div class="port-info" id="port-info"></div>
+            <!-- 시리얼 포트 화면: 뒤에 붙은 장비에 따라 JS 가 그린다 -->
+            <div id="view-serial">
+                <div class="content-header" id="ser-title">[ ]</div>
+                <div class="port-info" id="ser-port"></div>
+                <div id="ser-body"></div>
+                <div class="footer">에프엘시스템 &nbsp; E-mail: fms@flsystem.co.kr</div>
+            </div>
+
+            <!-- 접점 입력 (CN10/CN11) -->
+            <div id="view-din" style="display:none">
+                <div class="content-header">[ 접점 입력 ]</div>
                 <section class="section">
-                    <div class="section-title">활성 디바이스</div>
-                    <table class="sensor-table">
-                        <thead id="sensor-head"></thead>
-                        <tbody id="lim-rows"></tbody>
-                        <tbody id="sensor-rows"></tbody>
-                    </table>
-                    <div id="sensor-empty" style="text-align:center;padding:20px;color:#888;display:none">활성 항목이 없습니다</div>
-                    <div class="lim-ctl">
-                        검사 주기 <input id="trap-scan" maxlength="3"> 초
-                        &nbsp;&nbsp; 재알림 <input id="trap-repeat" maxlength="3"> 초
-                        <span style="color:#888">(0 = 벗어날 때 한 번만)</span>
-                        <button class="btn-save" style="margin-left:10px" onclick="saveLimits('')">임계값 저장</button>
-                        <span class="lim-msg" id="lim-msg"></span>
-                    </div>
-                </section>
-                <section class="section" id="din-section">
                     <div class="section-title">센서 상태 ( 1 : 정상, 2 : 경보 )
                         <span class="title-ctl">새로고침
                             <select id="poll-int">
@@ -441,44 +464,7 @@ th {
                         </span>
                     </div>
                     <div class="din-wrap" id="din-blocks"></div>
-                </section>
-                <div class="footer">에프엘시스템 &nbsp; E-mail: fms@flsystem.co.kr</div>
-            </div>
-
-            <!-- 온습도및입력 2 (시리얼 포트 2) -->
-            <div id="view-device2" style="display:none">
-                <div class="content-header">[ 온습도 센서 및 입출력데이터 — 시리얼 2 ]</div>
-                <div class="port-info" id="port-info2"></div>
-                <section class="section">
-                    <div class="section-title">활성 디바이스</div>
-                    <table class="sensor-table">
-                        <thead id="sensor-head2"></thead>
-                        <tbody id="lim-rows2"></tbody>
-                        <tbody id="sensor-rows2"></tbody>
-                    </table>
-                    <div id="sensor-empty2" style="text-align:center;padding:20px;color:#888;display:none">활성 항목이 없습니다</div>
-                    <div class="lim-ctl">
-                        검사 주기 <input id="trap-scan2" maxlength="3"> 초
-                        &nbsp;&nbsp; 재알림 <input id="trap-repeat2" maxlength="3"> 초
-                        <span style="color:#888">(0 = 벗어날 때 한 번만)</span>
-                        <button class="btn-save" style="margin-left:10px" onclick="saveLimits('2')">임계값 저장</button>
-                        <span class="lim-msg" id="lim-msg2"></span>
-                    </div>
-                </section>
-                <section class="section" id="din-section2">
-                    <div class="section-title">센서 상태 ( 1 : 정상, 2 : 경보 )
-                        <span class="title-ctl">새로고침
-                            <select id="poll-int2">
-                                <option value="500">0.5초</option>
-                                <option value="1000">1초</option>
-                                <option value="2000">2초</option>
-                                <option value="3000">3초</option>
-                                <option value="5000">5초</option>
-                                <option value="10000">10초</option>
-                            </select>
-                        </span>
-                    </div>
-                    <div class="din-wrap" id="din-blocks2"></div>
+                    <div id="din-empty" style="text-align:center;padding:20px;color:#888;display:none">접점 입력이 없습니다</div>
                 </section>
                 <div class="footer">에프엘시스템 &nbsp; E-mail: fms@flsystem.co.kr</div>
             </div>
@@ -873,26 +859,35 @@ function oidCell(valueCol, idx){
     return OID_ENTRY + '.' + (OID_VALUE_COL + valueCol) + '.' + idx;
 }
 
-/*  digitalInput.c names each row "IO<terminal> GP<pin>", so the page can draw
-    the connector without keeping a pin map of its own. State rides in the
-    alarm column, because the bank gives every device the same columns. */
+/*  An item OID, mirrored from snmp_custom.c: 22210.2.<device>.<number>.0,
+    where <device> is the sub-identifier the firmware reports as "oid" -- 1 for
+    the HVAC unit, 12082 for the UPS. Display only; nothing here speaks SNMP. */
+var OID_TABLE = '1.3.6.1.4.1.22210.2';
+
+function oidItem(it){
+    return OID_TABLE + '.' + it.oid + '.' + it.num + '.0';
+}
+
+/*  digitalInput.c names each contact "IO<terminal> GP<pin>", so the page can
+    draw the connector without keeping a pin map of its own. They are items
+    like everything else now, numbered 111 upward, and the name is what tells
+    them apart from the unit's own data. */
 var DIN_NAME = /^IO(\d+) GP(\d+)$/;
-var DIN_STATE_COL = 2;
 var DIN_PER_BLOCK = 8;
 var DIN_BLOCK_NAME = ['CN10', 'CN11'];
 
-/* "IO3 GP13" -> {io:3, gp:'GP13', dev:...}, or null if it is not an input. */
-function dinParse(dev){
-    var m = dev && dev.name ? DIN_NAME.exec(dev.name) : null;
+/* "IO3 GP13" -> {io:3, gp:'GP13', item:...}, or null if it is not an input. */
+function dinParse(it){
+    var m = it && it.name ? DIN_NAME.exec(it.name) : null;
     if(!m) return null;
-    return { io: parseInt(m[1], 10), gp: 'GP' + m[2], dev: dev };
+    return { io: parseInt(m[1], 10), gp: 'GP' + m[2], item: it };
 }
 
 /*  Returns the cell body, not just the text: an alarm is worth seeing without
     reading the number. */
 function dinState(e){
     if(!e) return '';
-    var v = (e.dev.values && e.dev.values[DIN_STATE_COL]!=null) ? e.dev.values[DIN_STATE_COL] : 0;
+    var v = (e.item.val==null) ? 0 : e.item.val;
     if(v===2) return '<span class="din-alarm">2</span>';
     return (v===1) ? '1' : '-';
 }
@@ -900,29 +895,29 @@ function dinState(e){
 /*  Hovering a contact shows the OID it is readable at, which keeps the OID out
     of the connector drawing -- sixteen of them printed would bury the states. */
 function dinTitle(e){
-    return e ? ' title="' + oidCell(DIN_STATE_COL, e.dev.index) + '"' : '';
+    return e ? ' title="' + oidItem(e.item) + '"' : '';
 }
 
-/*  Drawn on every device page: the contact inputs belong to the unit, not to
-    either serial port, so whichever page you are on they are there. */
-var DIN_SUFFIX = ['', '2'];
+/*  접점 화면은 이제 한 장뿐이다. 이 배열은 그 한 장을 가리키는 빈 접미사
+    하나만 들고 있는데, 화면마다 id 뒤에 접미사를 붙여 찾는 코드들이 그대로
+    동작하게 하려고 남겨둔다. */
+var DIN_SUFFIX = [''];
 
+/*  접점은 시리얼 포트가 아니라 장비에 달린 것이라 자기 화면을 갖는다. */
 function updDin(list){
-    if(list){ list.sort(function(a,b){ return a.io - b.io; }); }
-    for(var s=0; s<DIN_SUFFIX.length; s++){
-        updDinBlock(DIN_SUFFIX[s], list);
+    var wrap  = document.getElementById("din-blocks");
+    var empty = document.getElementById("din-empty");
+    if(!wrap) return;
+
+    if(!list || list.length === 0){
+        wrap.innerHTML = "";
+        if(empty) empty.style.display = "";
+        return;
     }
-}
+    if(empty) empty.style.display = "none";
+    list.sort(function(a,b){ return a.io - b.io; });
 
-function updDinBlock(sfx, list){
-    var sec  = document.getElementById('din-section'+sfx);
-    var wrap = document.getElementById('din-blocks'+sfx);
-    if(!sec || !wrap) return;
-
-    if(!list || list.length === 0){ sec.style.display='none'; wrap.innerHTML=''; return; }
-    sec.style.display='';
-
-    var html='';
+    var html="";
     for(var b=0; b*DIN_PER_BLOCK < list.length; b++){
         var part = list.slice(b*DIN_PER_BLOCK, (b+1)*DIN_PER_BLOCK);
         html += '<table class="din-table"><thead><tr>'
@@ -1069,14 +1064,258 @@ function saveLimits(sfx){
     inputs back without waiting on another /api/sensors reply. */
 var LIM_COLS = null;
 
-/*  Which port a page shows. The device says where it came from in "src": a
-    serial protocol stamps its port channel, anything else a DEVICE_SRC_*
-    value, so the page never needs its own copy of the bank layout. */
-var VIEW_SRC = { 'sensor': 0, 'sensor2': 1 };
+/*  ── 장비 화면 ────────────────────────────────────────────────────────────
 
-/*  The port in `ports` that serves `ch`. Matched on the channel rather than on
-    the array position, because a port that has not been set up yet is left out
-    of the array entirely. */
+    고객 문서의 화면을 그대로 옮긴 것이다. 슬라이드 9, 10, 11 이 UPS 세 장이고
+    18 이 항온항습기 두 장이다. 칸 안의 숫자가 item 번호이고, 여기 적힌 것이
+    그 번호다 -- 문서에 그렇게 그려져 있어서 순서도 묶음도 문서를 따른다.
+
+    어느 시리얼이 어느 장비인지는 여기서 정하지 않는다. 펌웨어가 포트마다
+    idev 를 실어 보내므로, 포트에 무엇을 걸었는지에 따라 아래 목록 중 하나가
+    그 포트의 화면이 된다.
+
+    블록 두 가지뿐이다.
+      per   라벨과 값을 한 줄에 몇 쌍씩 놓을지 (슬라이드 9, 11, 18)
+      cols  R/S/T 처럼 한 항목이 여러 번호로 나뉜 표 (슬라이드 10)          */
+
+var SCREENS = {};
+
+/* 항온항습기 (STHAV-MA) — 슬라이드 18 */
+SCREENS[1] = [
+{ menu:'동작상태', title:'[ STHAV-MA ]', blocks:[
+  { h:'현재상태', per:4, list:[
+    ['설정온도 (1)',1],['설정습도 (2)',2],['현재온도 (3)',3],['현재습도 (4)',4],
+    ['냉방편차 (5)',5],['난방편차 (6)',6],['가습편차 (7)',7],['제습편차 (8)',8]]},
+  { h:'운전상태 ( 0 : 정지, 1 : 운전 )', per:4, list:[
+    ['냉방운전(9)',9],['난방운전(10)',10],['가습운전(11)',11],['제습운전(12)',12],
+    ['송풍기운전(13)',13],['운전/정지(48)',48],['가습기전류(49)',49],['운전시간H(72)',72],
+    ['COMP1운전H(73)',73],['COMP2운전H(74)',74],['COMP3운전H(75)',75],['가습기운전H(76)',76]]},
+  { h:'경보 22포트 ( 0 : 정상, 1 : 경보 )', per:4, list:[
+    ['COMP 1(50)',50],['COMP 2(51)',51],['COMP 3(52)',52],['LP 1(53)',53],
+    ['LP 2(54)',54],['LP 3(55)',55],['HUMIDITY(56)',56],['HEATER(57)',57],
+    ['AIR FLOW(58)',58],['FAN(59)',59],['LEAKWATER(60)',60],['HIGH TEMP(61)',61],
+    ['LOW TEMP(62)',62],['HIGH HUMID(63)',63],['LOW HUMID(64)',64],['HARON(65)',65],
+    ['FILTER(66)',66],['정상/TOTAL경보(67)',67],['FEED WATER(68)',68],['DRAIN WATER(69)',69],
+    ['HUMID CYL.(70)',70],['CT(71)',71],['통신상태(100)',100]]}
+]},
+{ menu:'입/출력상태', title:'[ STHAV-MA ]  입력,출력상태', blocks:[
+  { h:'입력 17 포트 ( 0 : 정상, 1 : 경보 )', per:4, list:[
+    ['COMP 1 OCR(14)',14],['COMP1 LP(15)',15],['COMP 2 OCR(16)',16],['COMP 2 LP(17)',17],
+    ['HU OT(18)',18],['H OT(19)',19],['AFS(20)',20],['BWR OCR(21)',21],
+    ['REMOTE(22)',22],['LEAKWATER(23)',23],['HARON(24)',24],['COMP3 OCR(25)',25],
+    ['COMP3 LP(26)',26],['FILTER ALARM(27)',27],['W/L1(28)',28],['W/L2(29)',29],
+    ['WSEN(30)',30]]},
+  { h:'출력 17 포트 ( 0 : 정지, 1 : 운전 )', per:4, list:[
+    ['SSR (31)',31],['HEATER 1(32)',32],['HEATER 2(33)',33],['HEATER 3(34)',34],
+    ['HEATER 4(35)',35],['COMP 1(36)',36],['COMP 2(37)',37],['COMP 1 SOL(38)',38],
+    ['COMP 2 SOL(39)',39],['FAN(40)',40],['ALARM(41)',41],['C.W. VALVE(42)',42],
+    ['HU2(43)',43],['HU1(44)',44],['HU/SOL(45)',45],['COMP 3(46)',46],
+    ['COMP 3 SOL(47)',47]]}
+]}];
+
+/* SEC UPS (YES-SEC-V2T) — 슬라이드 9, 10, 11 */
+SCREENS[12082] = [
+{ menu:'현재상태', title:'[ YES-SEC-V2T ] 현재상태값', blocks:[
+  { h:'입출력 데이타', per:2, list:[
+    ['R-S상입력전압',1],['S-T상입력전압',2],['T-R상입력전압',3],['출력 전압[V]',4],
+    ['출력 전류[A]',5],['축전지전압[V]',6],['축전지전류[A]',7],['충전모드(8)',8],
+    ['출력 주파수 [Hz]',9]]},
+  { h:'UPS 종합상태', per:2, list:[
+    ['바이패스 전원',21],['입력전원 경보',25],['변환부 경보',23],['기타장비 경보',27]]},
+  { h:'통신연결( 0 : 정상, 1 : 데이타오류, 2: 통신경보 )', per:1, list:[
+    ['통신상태',28]]}
+]},
+/*  needs3ph: 단상으로 설정하면 메뉴에서 사라진다. 문서 슬라이드 13 각주 --
+    "단상 일때, 1을 기입하면, 좌측 메뉴에서 3상데이타 및 정격사양 화면이
+    사라진다". 정격사양 화면은 문서 어디에도 없어서 3상 데이터만 해당한다. */
+{ menu:'3상 입출력데이타', needs3ph:true,
+  title:'[ YES-SEC-V2T ]   UPS 3상 입/출력 데이타', blocks:[
+  { h:'3상 UPS 입/출력 데이타 (출력원 0:Normal, 1:On Battery, 2:0n Bypass)',
+    cols:['데이타 항목','R 상','S 상','T 상','단위'], rows:[
+    ['입력상태',84,85,null,'Input Bad/입력상수'],
+    ['입력주파수',86,90,94,'0.1 Hz'],
+    ['입력전압',87,91,95,'0.1 Vac'],
+    ['입력전류',88,92,96,'0.1 A'],
+    ['입력전력',89,93,97,'W'],
+    ['바이패스 상태',null,98,99,'0.1 주파수/입력상수'],
+    ['바이패스 전압',30,33,36,'0.1 Vac'],
+    ['바이패스 전류',31,34,37,'0.1 A'],
+    ['바이패스 전력',32,35,38,'W'],
+    ['출력상태',40,41,42,'출력원/0.1 주파수/출력상수'],
+    ['출력전압',43,47,51,'0.1 Vac'],
+    ['출력전류',44,48,52,'0.1 A'],
+    ['출력전력',45,49,53,'W'],
+    ['출력부하율',46,50,54,'%']]}
+]},
+{ menu:'축전지및경보상태', title:'[ YES-SEC-V2T ]   3상 UPS 데이타', blocks:[
+  { h:'축전지 상태', per:1, list:[
+    ['축전지 조건 (0:Good,1:Weak,2:Replace)',55],
+    ['축전지 상태 (0:OK, 1:Low, 2:Deplate)',56],
+    ['충전모드 (0:부동,1:충전,2:대기,3:방전)',57],
+    ['방전시간 [초]',58],['축전지 잔량 [분]',59],['축전지 충전율 [%]',60],
+    ['밧데리 전압 [0.1 VDC]',61],['밧데리 전류 [0.1 A]',62],['밧데리 온도 [도]',63]]},
+  { h:'UPS 경보내용 (0:정상,1:경보)', per:3, list:[
+    ['온도과열 경보',64],['입력 경보',65],['출력 고장',66],
+    ['과부하 경보',67],['바이패스 고장',68],['출력off 경보',69],
+    ['ups shutdown',70],['충전 경보',71],['시스템 off',72],
+    ['팬 경보',73],['fuse 경보',74],['일반적 경보',75],
+    ['Awaiting power',76],['shutdown pending',77],['shutdown imminent',78]]},
+  /*  81-83 은 문서 화면에는 있는데 프로토콜 응답 어디에도 실려오지 않는다.
+      자리는 문서대로 두고 값은 '-' 로 비워둔다 -- 0 으로 채우면 진짜 0 과
+      구분이 안 되고, 칸을 빼면 문서와 화면이 달라진다. */
+  { h:'UPS 통신경보(0:정상,1:데이타오류,2:통신경보)', per:2, list:[
+    ['통신 경보(28)',28],['FULL 데이타(81)',81],
+    ['COM 데이타(82)',82],['ACT 데이타(83)',83]]}
+]},
+/*  조회가 아니라 조작 화면이라 item 이 아니라 설정값을 그린다. */
+{ menu:'UPS 제어', title:'[ YES-SEC-V2T ]   UPS 제어', ctrl:true }];
+
+/*  ── UPS 제어 ────────────────────────────────────────────────────────────
+
+    문서 슬라이드 13. 값 셋을 적어 넣는 화면이고, 그중 상수는 화면 구성까지
+    바꾼다 -- 단상이면 3상 데이터 화면이 메뉴에서 빠진다.
+
+    장비로 보내는 명령이 아니라 우리 쪽 설정이다. 문서에 이 셋을 UPS 로
+    내보내는 명령이 없다. */
+var UPS_CTRL = [
+    { key:'ups_phase',      label:'단상(1)/3-1상(2)/3상(3)',        unit:'PH', def:3 },
+    { key:'ups_batt_src',   label:'축전지 상태(통신(1),입력전원(2))', unit:'PH', def:1 },
+    { key:'ups_batt_count', label:'축전지 수량(출력단상)',            unit:'EA', def:0 }
+];
+
+var UPS_CFG = { ups_phase:3, ups_batt_src:1, ups_batt_count:0 };
+
+/*  설정값을 한 번 읽어둔다. 메뉴 구성이 상수에 걸려 있어서, 값을 모르면
+    3상 화면을 보여야 할지 말지를 정할 수 없다. */
+function upsCfgLoad(then){
+    fetch('/api/config').then(function(r){
+        if(authRedirect(r)) return null;
+        return r.json();
+    }).then(function(d){
+        if(!d) return;
+        for(var i=0; i<UPS_CTRL.length; i++){
+            var k = UPS_CTRL[i].key;
+            if(d[k]!=null) UPS_CFG[k] = d[k];
+        }
+        if(then) then();
+    }).catch(function(){});
+}
+
+function upsCtrlSave(key){
+    var el  = document.getElementById('ups-'+key);
+    var msg = document.getElementById('ups-msg-'+key);
+    var v   = parseInt(el ? el.value : '', 10);
+
+    if(!isFinite(v)){
+        if(msg){ msg.style.color='red'; msg.textContent='정수만'; }
+        return;
+    }
+    var body = {}; body[key] = v;
+
+    if(msg){ msg.style.color='#0f5b87'; msg.textContent='저장 중...'; }
+    fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(body)
+    }).then(function(r){
+        if(authRedirect(r)) return null;
+        return r.json();
+    }).then(function(d){
+        if(d && d.ok===false){
+            if(msg){ msg.style.color='red'; msg.textContent='오류'; }
+            return;
+        }
+        if(msg){ msg.style.color='#0a7a0a'; msg.textContent='저장됨'; }
+        setTimeout(function(){ if(msg) msg.textContent=''; }, 3000);
+        /*  상수를 바꿨으면 메뉴가 달라진다. 값을 다시 읽고 곧바로 다시 그린다. */
+        upsCfgLoad(function(){ poll(); });
+    }).catch(function(){
+        if(msg){ msg.style.color='red'; msg.textContent='오류 발생'; }
+    });
+}
+
+function upsCtrlDraw(){
+    var html = '<section class="section"><table class="scr-table"><tbody>';
+    for(var i=0; i<UPS_CTRL.length; i++){
+        var c = UPS_CTRL[i];
+        var v = (UPS_CFG[c.key]!=null) ? UPS_CFG[c.key] : c.def;
+        html += '<tr><th class="scr-label" style="width:45%">'+escHtml(c.label)+'</th>'
+             +  '<td style="width:120px"><input id="ups-'+c.key+'" class="ip-input"'
+             +  ' maxlength="3" style="width:70px" value="'+v+'"> '+escHtml(c.unit)+'</td>'
+             +  '<td style="width:110px"><button class="btn-save"'
+             +  ' onclick="upsCtrlSave(\''+c.key+'\')">설정</button></td>'
+             +  '<td><span class="lim-msg" id="ups-msg-'+c.key+'"></span></td></tr>';
+    }
+    html += '</tbody></table>'
+         +  '<div style="color:#c00;padding:6px 2px">'
+         +  '※ 본 페이지는 시스템 제어 항목이며 정수만 기입바랍니다.</div>'
+         +  '</section>';
+    return html;
+}
+
+/*  ── 그리기 ──────────────────────────────────────────────────────────── */
+
+/*  번호 -> {name,unit,scale,val}. 한 번의 갱신 동안만 쓰는 색인이다. */
+var ITEM_BY = {};
+
+function itemLookup(dev, num){
+    var m = ITEM_BY[dev];
+    return (m && m[num]!=null) ? m[num] : null;
+}
+
+/*  값 한 칸. 등록되지 않은 번호는 '-' 로 둔다. 경보로 서 있으면 눈에 띄게. */
+function scrCell(dev, num){
+    var it = itemLookup(dev, num);
+    if(num==null) return '<td></td>';
+    if(!it) return '<td style="color:#bbb">-</td>';
+    var txt = fmtValue(it.val==null ? 0 : it.val, it);
+    var hot = (it.trap!=null && it.val===it.trap);
+    return '<td title="'+escHtml(oidItem(it))+'">'
+        + (hot ? '<span class="scr-alarm">'+txt+'</span>' : txt) + '</td>';
+}
+
+function scrBlockPairs(dev, b){
+    var html = '<table class="scr-table"><thead><tr><th class="scr-head" colspan="'
+             + (b.per*2) + '">' + escHtml(b.h) + '</th></tr></thead><tbody>';
+    for(var i=0; i<b.list.length; i+=b.per){
+        html += '<tr>';
+        for(var k=0; k<b.per; k++){
+            var e = b.list[i+k];
+            if(!e){ html += '<th></th><td></td>'; continue; }
+            html += '<th class="scr-label">'+escHtml(e[0])+'</th>' + scrCell(dev, e[1]);
+        }
+        html += '</tr>';
+    }
+    return html + '</tbody></table>';
+}
+
+function scrBlockCols(dev, b){
+    var html = '<table class="scr-table"><thead><tr><th class="scr-head" colspan="'
+             + b.cols.length + '">' + escHtml(b.h) + '</th></tr><tr>';
+    for(var c=0; c<b.cols.length; c++) html += '<th>'+escHtml(b.cols[c])+'</th>';
+    html += '</tr></thead><tbody>';
+    for(var r=0; r<b.rows.length; r++){
+        var row = b.rows[r];
+        html += '<tr><th class="scr-label">'+escHtml(row[0])+'</th>';
+        for(var c=1; c<row.length-1; c++) html += scrCell(dev, row[c]);
+        html += '<td>'+escHtml(row[row.length-1])+'</td></tr>';
+    }
+    return html + '</tbody></table>';
+}
+
+function scrDraw(dev, scr){
+    var html = '';
+    if(scr.ctrl) return upsCtrlDraw();
+    for(var i=0; i<scr.blocks.length; i++){
+        var b = scr.blocks[i];
+        html += '<section class="section">'
+             +  (b.cols ? scrBlockCols(dev, b) : scrBlockPairs(dev, b))
+             +  '</section>';
+    }
+    return html;
+}
+
+/*  The port in `ports` that serves `ch`. Matched on the channel rather than
+    on the array position, because a port that has not been set up yet is
+    left out of the array entirely. */
 function portByCh(ports, ch){
     for(var i=0; i<ports.length; i++){
         if(ports[i].ch === ch) return ports[i];
@@ -1084,110 +1323,118 @@ function portByCh(ports, ch){
     return null;
 }
 
-/*  The strip above a device table: which port the page is showing, how that
-    port is configured, and the OID shape for the values below it. */
-function updPortInfo(sfx, ch, port, cols){
-    var el = document.getElementById('port-info'+sfx);
-    if(!el) return;
-
-    var legend = '';
-    for(var c=0; c<cols.length; c++){
-        legend += (c ? ', ' : '') + (OID_VALUE_COL+c) + '=' + escHtml(cols[c].name);
-    }
-
-    var head;
+/*  시리얼 화면 위에 붙는 한 줄: 그 포트가 어떻게 설정돼 있고 값들이 어느
+    OID 아래 있는지. */
+function serPortLine(ch, port){
     if(!port){
-        head = '<b>시리얼 '+(ch+1)+'</b><span class="sep">|</span>포트 정보 없음';
-    } else {
-        head = '<b>시리얼 '+(port.ch+1)+'</b> '+escHtml(port['if'])
-             + '<span class="sep">|</span>프로토콜 <b>'+escHtml(port.proto)+'</b>'
-             + '<span class="sep">|</span>'
-             + port.baud+'-'+port.bits+'-'+escHtml(port.par)+'-'+port.stop
-             + '<span class="sep">|</span>TX=GP'+port.tx+' RX=GP'+port.rx
-             + ((port.de!=null && port.de!==255) ? ' DE=GP'+port.de : '');
+        return "<b>시리얼 "+(ch+1)+"</b><span class=\"sep\">|</span>포트 정보 없음";
     }
-
-    el.innerHTML = head
-        + '<br><b>SNMP</b> <span class="oid">'+OID_ENTRY+'.&lt;열&gt;.&lt;Idx&gt;</span>'
-        + '<span class="sep">|</span>'+legend
-        + '<span class="sep">|</span>트랩 <span class="oid">'+OID_TRAP+'</span>';
+    var head = "<b>시리얼 "+(port.ch+1)+"</b> "+escHtml(port["if"])
+        + "<span class=\"sep\">|</span>프로토콜 <b>"+escHtml(port.proto)+"</b>"
+        + "<span class=\"sep\">|</span>"
+        + port.baud+"-"+port.bits+"-"+escHtml(port.par)+"-"+port.stop
+        + "<span class=\"sep\">|</span>TX=GP"+port.tx+" RX=GP"+port.rx
+        + ((port.de!=null && port.de!==255) ? " DE=GP"+port.de : "");
+    var oid = ITEM_OID_DEV[port.idev];
+    if(oid!=null){
+        head += "<br><b>SNMP</b> <span class=\"oid\">"+OID_TABLE+"."+oid
+             +  ".&lt;번호&gt;.0</span>"
+             +  "<span class=\"sep\">|</span>트랩 <span class=\"oid\">"
+             +  OID_TRAP+"</span>";
+    }
+    return head;
 }
 
-/*  Draw one port's devices into its own table. */
-function updTable(suffix, cols, devs){
-    var head  = document.getElementById('sensor-head'+suffix);
-    var tbody = document.getElementById('sensor-rows'+suffix);
-    var empty = document.getElementById('sensor-empty'+suffix);
-    if(!head || !tbody || !empty) return;
+/*  ITEM_DEV_* 슬롯 -> OID 의 <장비> 자리. 펌웨어가 items 에 실어 보내는
+    것으로 채운다 -- 여기에 숫자를 적어두면 펌웨어와 둘이 되어 어긋난다. */
+var ITEM_OID_DEV = {};
 
-    var hh = '<tr><th class="col-idx">Idx</th><th>이름</th>';
-    for(var c=0; c<cols.length; c++){
-        var u = cols[c].unit ? ' ('+escHtml(cols[c].unit)+')' : '';
-        /*  The OID column goes under the name, so a full cell OID reads off the
-            header and the Idx together without a lookup anywhere else. */
-        hh += '<th>'+escHtml(cols[c].name)+u
-           +  '<span class="oid-col">.'+(OID_VALUE_COL+c)+'.&lt;Idx&gt;</span></th>';
+/*  지금 보고 있는 화면. kind 는 serial / din / comm. */
+var CUR = { kind:"serial", ch:0, scr:0 };
+
+/*  포트에 걸린 장비의 화면 목록. 아무것도 안 걸렸으면 빈 배열. */
+function screensFor(port){
+    if(!port) return [];
+    var oid = ITEM_OID_DEV[port.idev];
+    var all = (oid!=null && SCREENS[oid]) ? SCREENS[oid] : [];
+    var out = [];
+
+    /*  단상이면 3상 화면을 목록에서 뺀다. 숨기는 게 아니라 아예 빼는 것이라,
+        그 뒤 화면들의 번호가 당겨진다 -- CUR.scr 도 이 목록을 가리키므로
+        메뉴와 본문이 같은 것을 센다. */
+    for(var i=0; i<all.length; i++){
+        if(all[i].needs3ph && UPS_CFG.ups_phase === 1) continue;
+        out.push(all[i]);
     }
-    head.innerHTML = hh + '</tr>';
+    return out;
+}
 
-    if(devs.length === 0){ tbody.innerHTML=''; empty.style.display=''; return; }
-    empty.style.display='none';
-
-    var html='';
-    for(var i=0; i<devs.length; i++){
-        var dev = devs[i];
-        html += '<tr><td class="col-idx">'+dev.index+'</td><th>'+escHtml(dev.name)+'</th>';
-        for(var c=0; c<cols.length; c++){
-            var v = (dev.values && dev.values[c]!=null) ? dev.values[c] : 0;
-            html += '<td title="'+oidCell(c, dev.index)+'">'
-                 +  fmtValue(v, cols[c])+'</td>';
-        }
-        html += '</tr>';
+/*  시리얼 아래 하위 메뉴. 포트 설정이 바뀌면 목록도 바뀌므로 갱신할 때마다
+    다시 만든다. */
+function buildSubmenu(ch, port){
+    var ul = document.getElementById("submenu-ser"+ch);
+    if(!ul) return;
+    var list = screensFor(port);
+    var html = "";
+    for(var i=0; i<list.length; i++){
+        var on = (CUR.kind==="serial" && CUR.ch===ch && CUR.scr===i);
+        html += "<li"+(on?" class=\"active\"":"")
+             +  " onclick=\"showSerial("+ch+","+i+")\">"
+             +  escHtml(list[i].menu)+"</li>";
     }
-    tbody.innerHTML=html;
+    ul.innerHTML = html;
+}
+
+/*  선택된 시리얼 화면을 그린다. */
+function drawSerial(ports){
+    var port = portByCh(ports, CUR.ch);
+    var list = screensFor(port);
+    var t = document.getElementById("ser-title");
+    var p = document.getElementById("ser-port");
+    var b = document.getElementById("ser-body");
+    if(!t || !p || !b) return;
+
+    p.innerHTML = serPortLine(CUR.ch, port);
+
+    if(!list.length){
+        t.textContent = "[ 시리얼 "+(CUR.ch+1)+" ]";
+        b.innerHTML = "<section class=\"section\"><div style=\"text-align:center;padding:20px;color:#888\">이 포트에 장비가 지정되지 않았습니다. 환경설정의 Mode 에서 고르십시오.</div></section>";
+        return;
+    }
+    if(CUR.scr >= list.length) CUR.scr = 0;
+    var scr = list[CUR.scr];
+    t.textContent = scr.title;
+    b.innerHTML = scrDraw(ITEM_OID_DEV[port.idev], scr);
 }
 
 function upd(d){
-    var cols = d.columns || [];
-    var all  = d.devices || [];
-
-    /*  Contact inputs get their own block whatever page you are on; the rest
-        go to the page for the port that produced them. */
-    var din=[], byPort={};
-    for(var i=0; i<all.length; i++){
-        var e = dinParse(all[i]);
-        if(e){ din.push(e); continue; }
-        var src = (all[i].src==null) ? 0 : all[i].src;
-        (byPort[src] = byPort[src] || []).push(all[i]);
-    }
-
-    updTable('',  cols, byPort[VIEW_SRC['sensor']]  || []);
-    updTable('2', cols, byPort[VIEW_SRC['sensor2']] || []);
-    updDin(din);
-
-    /*  The threshold row needs the column list, which only arrives with the
-        readings. Built on the first reply that carries one, then left alone. */
-    if(cols.length && !LIM_COLS){
-        LIM_COLS = cols;
-        for(var s=0; s<DIN_SUFFIX.length; s++) limBuild(DIN_SUFFIX[s], cols);
-        limLoad(cols);
-    }
-
     var ports = d.ports || [];
-    updPortInfo('',  VIEW_SRC['sensor'],
-                portByCh(ports, VIEW_SRC['sensor']),  cols);
-    updPortInfo('2', VIEW_SRC['sensor2'],
-                portByCh(ports, VIEW_SRC['sensor2']), cols);
+    var items = d.items || [];
 
-    document.getElementById('comm_status').textContent=d.comm.status;
-    document.getElementById('recv_cs').textContent=d.comm.recv_cs;
-    document.getElementById('calc_cs').textContent=d.comm.calc_cs;
-    document.getElementById('comm_check').textContent=d.comm.check;
-    document.getElementById('comm_flag').textContent=d.comm.flag;
+    /*  번호로 바로 찾을 수 있게 장비별로 묶는다. 접점은 이름으로 가려내
+        자기 화면으로 보낸다. */
+    ITEM_BY = {};
+    ITEM_OID_DEV = {};
+    var din = [];
+    for(var i=0; i<items.length; i++){
+        var it = items[i];
+        ITEM_OID_DEV[it.dev] = it.oid;
+        (ITEM_BY[it.oid] = ITEM_BY[it.oid] || {})[it.num] = it;
+        var e = dinParse(it);
+        if(e) din.push(e);
+    }
+
+    for(var ch=0; ch<2; ch++) buildSubmenu(ch, portByCh(ports, ch));
+    if(CUR.kind==="serial") drawSerial(ports);
+    else if(CUR.kind==="din") updDin(din);
+
+    document.getElementById("comm_status").textContent=d.comm.status;
+    document.getElementById("recv_cs").textContent=d.comm.recv_cs;
+    document.getElementById("calc_cs").textContent=d.comm.calc_cs;
+    document.getElementById("comm_check").textContent=d.comm.check;
+    document.getElementById("comm_flag").textContent=d.comm.flag;
 }
 
-/* Session expiry → server replies with a redirect to /login. Detect it and
-   move the whole page to the login screen (auto-logout). */
 function authRedirect(r){
     if(r.redirected || r.status===401){ location.href='/login'; return true; }
     return false;
@@ -1239,7 +1486,12 @@ function pollRestart(ms){
         };
     }
     for(var i=0; i<sels.length; i++){ sels[i].value = String(ms); }
-    pollRestart(ms);
+
+    /*  설정값을 먼저 읽고 첫 폴링을 돌린다. 메뉴에 3상 화면을 넣을지가 상수에
+        걸려 있어서, 모르는 채로 그리면 단상인데 3상 화면이 한 번 스쳤다가
+        사라진다. 읽기가 실패해도 폴링은 시작한다 -- 기본값(3상)으로 간다. */
+    upsCfgLoad(function(){ pollRestart(ms); });
+    setTimeout(function(){ if(!pollTimer) pollRestart(ms); }, 1500);
 })();
 
 var _pendingTab=null;
@@ -1254,29 +1506,44 @@ function showTab(tab){
     _doShowTab(tab);
 }
 function _setMenu(active){
-    document.getElementById('menu-sensor').className='sub'+(active==='device'?' active':'');
-    document.getElementById('menu-sensor2').className='sub'+(active==='device2'?' active':'');
-    document.getElementById('menu-comm').className='sub'+(active==='comm'?' active':'');
-    document.getElementById('menu-network').className=(active==='config')?'active':'';
-    document.getElementById('menu-config').className=(active==='setup')?'active':'';
+    document.getElementById("menu-ser0").className="sub"
+        +((active==="serial"&&CUR.ch===0)?" active":"");
+    document.getElementById("menu-ser1").className="sub"
+        +((active==="serial"&&CUR.ch===1)?" active":"");
+    document.getElementById("menu-din").className="sub"+((active==="din")?" active":"");
+    document.getElementById("menu-comm").className="sub"+((active==="comm")?" active":"");
+    document.getElementById("menu-network").className=(active==="config")?"active":"";
+    document.getElementById("menu-config").className=(active==="setup")?"active":"";
 }
 function _doShowTab(tab){
-    document.getElementById('tab-sensor').style.display=(tab==='sensor'||tab==='device'||tab==='comm')?'':'none';
-    document.getElementById('tab-config').style.display=(tab==='config')?'':'none';
-    document.getElementById('tab-setup').style.display=(tab==='setup')?'':'none';
-    if(tab==='config'){ _setMenu('config'); loadConfig(); }
-    else if(tab==='setup'){ _setMenu('setup'); loadConfig(); loadAccounts(); }
+    document.getElementById("tab-sensor").style.display=
+        (tab==="config"||tab==="setup")?"none":"";
+    document.getElementById("tab-config").style.display=(tab==="config")?"":"none";
+    document.getElementById("tab-setup").style.display=(tab==="setup")?"":"none";
+    if(tab==="config"){ _setMenu("config"); loadConfig(); }
+    else if(tab==="setup"){ _setMenu("setup"); loadConfig(); loadAccounts(); }
 }
-/* 현재상태 하위: 온습도및입력(device) / 통신데이타(comm) 뷰 전환 */
-function showSensor(view){
-    document.getElementById('tab-sensor').style.display='';
-    document.getElementById('tab-config').style.display='none';
-    document.getElementById('tab-setup').style.display='none';
-    document.getElementById('view-device').style.display=(view==='device')?'':'none';
-    document.getElementById('view-device2').style.display=(view==='device2')?'':'none';
-    document.getElementById('view-comm').style.display=(view==='comm')?'':'none';
-    _setMenu(view);
+
+/*  현재상태 아래의 세 갈래. 어느 쪽이든 곧바로 다시 그린다 -- 다음 폴링을
+    기다리면 메뉴만 바뀌고 내용이 한 박자 늦게 따라온다. */
+function _showKind(kind){
+    document.getElementById("tab-sensor").style.display="";
+    document.getElementById("tab-config").style.display="none";
+    document.getElementById("tab-setup").style.display="none";
+    document.getElementById("view-serial").style.display=(kind==="serial")?"":"none";
+    document.getElementById("view-din").style.display=(kind==="din")?"":"none";
+    document.getElementById("view-comm").style.display=(kind==="comm")?"":"none";
+    CUR.kind=kind;
+    _setMenu(kind);
+    poll();
 }
+function showSerial(ch, scr){
+    CUR.ch = ch;
+    CUR.scr = (scr==null) ? 0 : scr;
+    _showKind("serial");
+}
+function showDin(){ _showKind("din"); }
+function showComm(){ _showKind("comm"); }
 
 function verifyPass(){
     var pass=document.getElementById('modal-pass').value;
