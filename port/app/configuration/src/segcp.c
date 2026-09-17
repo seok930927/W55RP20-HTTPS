@@ -20,6 +20,7 @@
 #include "util.h"
 #include "bufferHandler.h"
 #include "uartHandler.h"
+#include "serialProtocol.h"     /* serial_protocol_max_id */
 #include "spiHandler.h"
 #include "gpioHandler.h"
 #include "timerHandler.h"
@@ -891,7 +892,12 @@ uint16_t proc_SEGCP(uint8_t* segcp_req, uint8_t* segcp_rep, uint8_t segcp_privil
                     break;
                 case SEGCP_PO:
                     tmp_int = atoi(param);
-                    if (param_len > 2 || tmp_int > modbus_ascii) {
+                    /*  The registry is what the web page bounds this against,
+                        so bound the serial console against the same thing.
+                        A number here was frozen at modbus_ascii and stayed
+                        there while protocols were added, which left the
+                        console refusing protocols the dropdown offered. */
+                    if (param_len > 2 || tmp_int > (int)serial_protocol_max_id()) {
                         ret |= SEGCP_RET_ERR_INVALIDPARAM;
                     } else {
                         dev_config->serial_option.protocol = tmp_int;
