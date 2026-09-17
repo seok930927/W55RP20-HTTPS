@@ -8,6 +8,7 @@
 #include "deviceHandler.h"
 #include "netHandler.h"
 #include "sensor.h"
+#include "itemBank.h"
 #include "snmp.h"
 #include "snmp_custom.h"
 #include "snmpHandler.h"
@@ -25,18 +26,28 @@
 static uint8_t snmp_initialized = FALSE;
 static uint8_t snmp_agent_ip[4] = {0, };
 
-/*  Ring queue of cells awaiting a trap: a device and one of its value columns.
+/*  Ring queue of things awaiting a trap.
 
     It held device numbers before, and the flush sent every column of each, so
     one contact changing state put three traps on the wire and two of them
     carried a value nobody had asked about. A limit crossing is about one
     column, so the queue holds one.
 
-    Producers: any task via snmp_notify_cell()/snmp_notify_device(), and the
-    limit sweep below. Consumer: snmp_agent_task via snmp_flush_traps(). */
+    Two kinds go through it now, because there are two banks. `kind` says how
+    to read the other two bytes -- one queue rather than two keeps the order
+    traps were raised in, which is what a manager sees as the order events
+    happened.
+
+    Producers: any task via snmp_notify_cell()/snmp_notify_device()/
+    snmp_notify_item(), and the two sweeps below. Consumer: snmp_agent_task
+    via snmp_flush_traps(). */
+#define TRAP_KIND_CELL      0       /* a = device row,   b = value column */
+#define TRAP_KIND_ITEM      1       /* a = ITEM_DEV_*,   b = 항목 번호    */
+
 typedef struct {
-    uint8_t dev;
-    uint8_t col;
+    uint8_t kind;
+    uint8_t a;
+    uint8_t b;
 } TrapCell;
 
 static volatile TrapCell snmp_trap_q[SNMP_TRAP_QUEUE_LEN];
@@ -94,24 +105,36 @@ void snmp_request_reinit(void) {
     snmp_agent_close();
 }
 
+static void snmp_trap_push(uint8_t kind, uint8_t a, uint8_t b) {
+    taskENTER_CRITICAL();
+    uint8_t next = (uint8_t)((snmp_trap_q_head + 1) % SNMP_TRAP_QUEUE_LEN);
+    if (next != snmp_trap_q_tail) {            /* drop if queue full */
+        snmp_trap_q[snmp_trap_q_head].kind = kind;
+        snmp_trap_q[snmp_trap_q_head].a = a;
+        snmp_trap_q[snmp_trap_q_head].b = b;
+        snmp_trap_q_head = next;
+    }
+    taskEXIT_CRITICAL();
+}
+
 void snmp_notify_cell(uint8_t dev, uint8_t col) {
     if (dev >= DEVICE_COUNT || col >= DEVICE_VALUE_COLS) {
         return;
     }
-    taskENTER_CRITICAL();
-    uint8_t next = (uint8_t)((snmp_trap_q_head + 1) % SNMP_TRAP_QUEUE_LEN);
-    if (next != snmp_trap_q_tail) {            /* drop if queue full */
-        snmp_trap_q[snmp_trap_q_head].dev = dev;
-        snmp_trap_q[snmp_trap_q_head].col = col;
-        snmp_trap_q_head = next;
-    }
-    taskEXIT_CRITICAL();
+    snmp_trap_push(TRAP_KIND_CELL, dev, col);
 }
 
 void snmp_notify_device(uint8_t dev) {
     for (uint8_t c = 0; c < DEVICE_VALUE_COLS; c++) {
         snmp_notify_cell(dev, c);
     }
+}
+
+void snmp_notify_item(uint8_t dev, uint8_t num) {
+    if (!item_is_registered(dev, num)) {
+        return;
+    }
+    snmp_trap_push(TRAP_KIND_ITEM, dev, num);
 }
 
 /*  Is `v` outside the rule for value column `col`?
@@ -194,9 +217,49 @@ static void snmp_limit_scan(void) {
     }
 }
 
+/*  Which items were sitting at their trap value on the previous sweep.
+
+    One byte per number, not the value itself: the only thing the edge needs to
+    know is whether it was already there. 280 bytes for both devices.
+
+    The rule the customer wrote is "경보상태 값이 1이면 트랩 한번 발생" -- once,
+    not once per sweep -- so a trap goes out on the way in and nothing goes out
+    while it stays. Coming back down is silent unless the protocol publishes a
+    recovery item of its own, which is what UPS 22 is. */
+static uint8_t s_item_at_trap[ITEM_DEV_CNT][ITEM_NUM_MAX];
+
+/*  Last dropped-item count that was logged, so the warning is printed when it
+    changes instead of on every cycle. */
+static uint16_t s_dropped_reported;
+
+static void snmp_item_scan(void) {
+    for (uint8_t dev = 0; dev < ITEM_DEV_CNT; dev++) {
+        uint16_t cnt = item_count(dev);
+
+        for (uint16_t i = 0; i < cnt; i++) {
+            const ItemDef *def = item_at(dev, i);
+            int32_t v;
+            uint8_t now;
+
+            if (def == NULL || def->trap_on == 0) {
+                continue;               /* 트랩 대상이 아닌 항목 */
+            }
+            if (item_get(dev, def->num, &v) != 0) {
+                continue;
+            }
+
+            now = (v == (int32_t)def->trap_on) ? 1u : 0u;
+            if (now && !s_item_at_trap[dev][def->num]) {
+                snmp_notify_item(dev, def->num);
+            }
+            s_item_at_trap[dev][def->num] = now;
+        }
+    }
+}
+
 /*  Drain the trap queue. Runs inside snmp_agent_task so it shares the trap
     socket sequentially — no cross-task contention. One trap is emitted per
-    value column of each queued device. */
+    queued entry. */
 static void snmp_flush_traps(void) {
     DevConfig *conf = get_DevConfig_pointer();
 
@@ -209,11 +272,12 @@ static void snmp_flush_traps(void) {
     }
 
     while (snmp_trap_q_tail != snmp_trap_q_head) {
-        uint8_t dev, col;
+        uint8_t kind, a, b;
 
         taskENTER_CRITICAL();
-        dev = snmp_trap_q[snmp_trap_q_tail].dev;
-        col = snmp_trap_q[snmp_trap_q_tail].col;
+        kind = snmp_trap_q[snmp_trap_q_tail].kind;
+        a    = snmp_trap_q[snmp_trap_q_tail].a;
+        b    = snmp_trap_q[snmp_trap_q_tail].b;
         snmp_trap_q_tail = (uint8_t)((snmp_trap_q_tail + 1) % SNMP_TRAP_QUEUE_LEN);
         taskEXIT_CRITICAL();
 
@@ -222,7 +286,11 @@ static void snmp_flush_traps(void) {
             if ((mgr[0] | mgr[1] | mgr[2] | mgr[3]) == 0) {
                 continue;                     /* trap destination not set */
             }
-            snmp_custom_sendValueTrap(mgr, snmp_agent_ip, dev, col);
+            if (kind == TRAP_KIND_ITEM) {
+                snmp_custom_sendItemTrap(mgr, snmp_agent_ip, a, b);
+            } else {
+                snmp_custom_sendValueTrap(mgr, snmp_agent_ip, a, b);
+            }
         }
     }
 }
@@ -251,13 +319,25 @@ void snmp_agent_task(void *argument) {
         /*  Decide what is worth reporting before draining the queue, so a
             crossing found on this cycle goes out on this cycle. */
         snmp_limit_scan();
+        snmp_item_scan();
 
         /*  Send any queued traps (reuses the agent socket; snmpd_run below
             reopens it from SOCK_CLOSED on the same cycle). */
         snmp_flush_traps();
 
-        /* Sync sensor bank → SNMP table before serving any request */
+        /* Sync both banks → SNMP table before serving any request */
         snmp_custom_refresh();
+
+        /*  The item table has a fixed budget. Say so once when something did
+            not fit, rather than letting the missing OIDs read as "that item
+            does not exist". */
+        if (snmp_custom_item_dropped() != s_dropped_reported) {
+            s_dropped_reported = snmp_custom_item_dropped();
+            if (s_dropped_reported) {
+                PRT_ERR("SNMP: %u item(s) did not fit the table\r\n",
+                        (unsigned)s_dropped_reported);
+            }
+        }
 
         if (snmpd_run() < 0) {
             PRT_ERR("SNMP Agent run failed, retry after socket reinit\r\n");

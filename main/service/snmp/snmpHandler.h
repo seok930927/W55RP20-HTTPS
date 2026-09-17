@@ -20,4 +20,12 @@ void snmp_notify_cell(uint8_t dev, uint8_t col);
 /*  Every value column of one device at once. Same caveat as above. */
 void snmp_notify_device(uint8_t dev);
 
+/*  Queue one flat item (itemBank.h) for a trap. `dev` is an ITEM_DEV_* slot.
+
+    Same relationship as above: the agent watches every registered item against
+    its ItemDef.trap_on and reports the moment one arrives at that value, so a
+    protocol that writes into the item bank gets its traps without asking. This
+    is for a protocol that is told outright. */
+void snmp_notify_item(uint8_t dev, uint8_t num);
+
 #endif /* SNMPHANDLER_H_ */
