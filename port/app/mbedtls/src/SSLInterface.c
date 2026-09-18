@@ -507,6 +507,22 @@ int wiz_tls_server_init(wiz_tls_context* tlsContext, int* socket_fd) {
 
     if (!https_session_cache_initialized) {
         mbedtls_ssl_cache_init(&https_session_cache);
+
+        /*  How many finished sessions to remember so a returning browser can
+            skip the full handshake.
+
+            mbedtls defaults to fifty, and every entry holds a session on the
+            heap. Nobody bounded it here, so refreshing the page five times a
+            second filled all fifty inside ten seconds -- which is exactly the
+            gesture that was rebooting the unit. The cache was quietly turning
+            a browser's refresh key into heap pressure.
+
+            Four is one per HTTPS socket plus one. Past that the oldest entry
+            is overwritten, not refused: a client whose entry has been pushed
+            out simply does a full handshake again, which costs an RSA
+            operation and nothing else. Nobody is logged out by it -- the
+            login session is a cookie and lives elsewhere. */
+        mbedtls_ssl_cache_set_max_entries(&https_session_cache, MAX_HTTPSOCK + 1);
         https_session_cache_initialized = 1;
     }
     mbedtls_ssl_conf_session_cache(tlsContext->conf,
