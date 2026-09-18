@@ -30,6 +30,112 @@
 //unsigned char tempBuf[DEBUG_BUFFER_SIZE] = {0,};
 static int wiz_tls_init_state;
 
+/*  ── Allocating a session's contexts ───────────────────────────────────────
+
+    Seven structs, and until now each call site allocated them itself and then
+    disagreed with the other about what to do when one came back NULL.
+
+    wiz_tls_init() did not check at all: mbedtls_entropy_init(NULL) is a memset
+    through a null pointer.
+
+    wiz_tls_server_init() checked and returned -1 -- leaving six live pointers
+    that had never been through mbedtls_*_init(). The caller then calls
+    wiz_tls_deinit(), whose guards are `if (ptr)`, so it ran mbedtls_ssl_free()
+    over a block of uninitialised heap and followed whatever pointers were
+    lying in it. That is the reboot under rapid HTTPS reconnects: the heap
+    tightens, one allocation misses, and the cleanup path walks garbage.
+
+    Both go through this now. Every pointer that exists has been initialised
+    before anything can fail, so deinit's guards mean what they say, and a
+    partial allocation is handed back rather than leaked.                    */
+
+static void tls_ctx_free_blocks(wiz_tls_context *t) {
+#if defined (MBEDTLS_ENTROPY_C)
+    if (t->entropy)  {
+        vPortFree(t->entropy);
+        t->entropy  = NULL;
+    }
+#endif
+    if (t->ctr_drbg) {
+        vPortFree(t->ctr_drbg);
+        t->ctr_drbg = NULL;
+    }
+    if (t->ssl)      {
+        vPortFree(t->ssl);
+        t->ssl      = NULL;
+    }
+    if (t->conf)     {
+        vPortFree(t->conf);
+        t->conf     = NULL;
+    }
+    if (t->cacert)   {
+        vPortFree(t->cacert);
+        t->cacert   = NULL;
+    }
+    if (t->clicert)  {
+        vPortFree(t->clicert);
+        t->clicert  = NULL;
+    }
+    if (t->pkey)     {
+        vPortFree(t->pkey);
+        t->pkey     = NULL;
+    }
+}
+
+/*  0 on success. On failure nothing is left allocated and every pointer is
+    NULL, so a deinit after this call is a no-op rather than a fault. */
+static int tls_ctx_alloc(wiz_tls_context *t) {
+#if defined (MBEDTLS_ENTROPY_C)
+    t->entropy  = pvPortMalloc(sizeof(mbedtls_entropy_context));
+#endif
+    t->ctr_drbg = pvPortMalloc(sizeof(mbedtls_ctr_drbg_context));
+    t->ssl      = pvPortMalloc(sizeof(mbedtls_ssl_context));
+    t->conf     = pvPortMalloc(sizeof(mbedtls_ssl_config));
+    t->cacert   = pvPortMalloc(sizeof(mbedtls_x509_crt));
+    t->clicert  = pvPortMalloc(sizeof(mbedtls_x509_crt));
+    t->pkey     = pvPortMalloc(sizeof(mbedtls_pk_context));
+
+    /*  Initialise whatever came back before deciding whether to go on. These
+        calls only zero their struct; none of them can fail. Doing it here is
+        what makes the failure path below safe to free. */
+#if defined (MBEDTLS_ENTROPY_C)
+    if (t->entropy) {
+        mbedtls_entropy_init(t->entropy);
+    }
+#endif
+    if (t->ctr_drbg) {
+        mbedtls_ctr_drbg_init(t->ctr_drbg);
+    }
+    if (t->ssl) {
+        mbedtls_ssl_init(t->ssl);
+    }
+    if (t->conf) {
+        mbedtls_ssl_config_init(t->conf);
+    }
+    if (t->cacert) {
+        mbedtls_x509_crt_init(t->cacert);
+    }
+    if (t->clicert) {
+        mbedtls_x509_crt_init(t->clicert);
+    }
+    if (t->pkey) {
+        mbedtls_pk_init(t->pkey);
+    }
+
+    if (!t->ctr_drbg || !t->ssl || !t->conf || !t->cacert || !t->clicert
+            || !t->pkey
+#if defined (MBEDTLS_ENTROPY_C)
+            || !t->entropy
+#endif
+       ) {
+        PRT_SSL(" failed\r\n  ! TLS context allocation failed, free heap %u\r\n",
+                (unsigned)xPortGetFreeHeapSize());
+        tls_ctx_free_blocks(t);
+        return -1;
+    }
+    return 0;
+}
+
 static mbedtls_ssl_cache_context https_session_cache;
 static uint8_t https_session_cache_initialized = 0;
 static const char HTTPS_SERVER_CERT[] =
@@ -205,26 +311,10 @@ int wiz_tls_init(wiz_tls_context* tlsContext, int* socket_fd) {
         PRT_SSL(" failed\r\n  ! psa_crypto_init returned %d\r\n", (int)psa_status);
         return -1;
     }
-#if defined (MBEDTLS_ENTROPY_C)
-    tlsContext->entropy = pvPortMalloc(sizeof(mbedtls_entropy_context));
-#endif
-    tlsContext->ctr_drbg = pvPortMalloc(sizeof(mbedtls_ctr_drbg_context));
-    tlsContext->ssl = pvPortMalloc(sizeof(mbedtls_ssl_context));
-    tlsContext->conf = pvPortMalloc(sizeof(mbedtls_ssl_config));
-    tlsContext->cacert = pvPortMalloc(sizeof(mbedtls_x509_crt));
-    tlsContext->clicert = pvPortMalloc(sizeof(mbedtls_x509_crt));
-    tlsContext->pkey = pvPortMalloc(sizeof(mbedtls_pk_context));
+    if (tls_ctx_alloc(tlsContext) != 0) {
+        return -1;
+    }
 
-#if defined (MBEDTLS_ENTROPY_C)
-    mbedtls_entropy_init(tlsContext->entropy);
-#endif
-
-    mbedtls_ctr_drbg_init(tlsContext->ctr_drbg);
-    mbedtls_ssl_init(tlsContext->ssl);
-    mbedtls_ssl_config_init(tlsContext->conf);
-    mbedtls_x509_crt_init(tlsContext->cacert);
-    mbedtls_x509_crt_init(tlsContext->clicert);
-    mbedtls_pk_init(tlsContext->pkey);
     const int *ciphersuite_list = mbedtls_ssl_list_ciphersuites();
     while (*ciphersuite_list != 0) {
         const char *name = mbedtls_ssl_get_ciphersuite_name(*ciphersuite_list);
@@ -352,35 +442,9 @@ int wiz_tls_server_init(wiz_tls_context* tlsContext, int* socket_fd) {
         return -1;
     }
 
-#if defined (MBEDTLS_ENTROPY_C)
-    tlsContext->entropy = pvPortMalloc(sizeof(mbedtls_entropy_context));
-#endif
-    tlsContext->ctr_drbg = pvPortMalloc(sizeof(mbedtls_ctr_drbg_context));
-    tlsContext->ssl = pvPortMalloc(sizeof(mbedtls_ssl_context));
-    tlsContext->conf = pvPortMalloc(sizeof(mbedtls_ssl_config));
-    tlsContext->cacert = pvPortMalloc(sizeof(mbedtls_x509_crt));
-    tlsContext->clicert = pvPortMalloc(sizeof(mbedtls_x509_crt));
-    tlsContext->pkey = pvPortMalloc(sizeof(mbedtls_pk_context));
-
-    if (!tlsContext->ctr_drbg || !tlsContext->ssl || !tlsContext->conf ||
-            !tlsContext->cacert || !tlsContext->clicert || !tlsContext->pkey
-#if defined (MBEDTLS_ENTROPY_C)
-            || !tlsContext->entropy
-#endif
-       ) {
-        PRT_SSL(" failed\r\n  ! HTTPS server memory allocation failed\r\n");
+    if (tls_ctx_alloc(tlsContext) != 0) {
         return -1;
     }
-
-#if defined (MBEDTLS_ENTROPY_C)
-    mbedtls_entropy_init(tlsContext->entropy);
-#endif
-    mbedtls_ctr_drbg_init(tlsContext->ctr_drbg);
-    mbedtls_ssl_init(tlsContext->ssl);
-    mbedtls_ssl_config_init(tlsContext->conf);
-    mbedtls_x509_crt_init(tlsContext->cacert);
-    mbedtls_x509_crt_init(tlsContext->clicert);
-    mbedtls_pk_init(tlsContext->pkey);
 
 #if defined (MBEDTLS_ENTROPY_C)
     ret = mbedtls_ctr_drbg_seed(tlsContext->ctr_drbg, mbedtls_entropy_func,
@@ -492,36 +556,7 @@ void wiz_tls_deinit(wiz_tls_context* tlsContext) {
         mbedtls_pk_free(tlsContext->pkey);
     }
 
-#if defined (MBEDTLS_ENTROPY_C)
-    if (tlsContext->entropy) {
-        vPortFree(tlsContext->entropy);
-        tlsContext->entropy = NULL;
-    }
-#endif
-    if (tlsContext->ctr_drbg) {
-        vPortFree(tlsContext->ctr_drbg);
-        tlsContext->ctr_drbg = NULL;
-    }
-    if (tlsContext->ssl) {
-        vPortFree(tlsContext->ssl);
-        tlsContext->ssl = NULL;
-    }
-    if (tlsContext->conf) {
-        vPortFree(tlsContext->conf);
-        tlsContext->conf = NULL;
-    }
-    if (tlsContext->cacert) {
-        vPortFree(tlsContext->cacert);
-        tlsContext->cacert = NULL;
-    }
-    if (tlsContext->clicert) {
-        vPortFree(tlsContext->clicert);
-        tlsContext->clicert = NULL;
-    }
-    if (tlsContext->pkey) {
-        vPortFree(tlsContext->pkey);
-        tlsContext->pkey = NULL;
-    }
+    tls_ctx_free_blocks(tlsContext);
 }
 
 int wiz_tls_socket(wiz_tls_context* tlsContext, uint8_t sock, unsigned int port) {
