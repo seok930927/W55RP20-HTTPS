@@ -59,8 +59,23 @@
       IN  : -14 KB / context
       OUT :  -8 KB / context
 */
+/*  Per-session record buffers, and the largest thing on the heap after the
+    task stacks -- mbedtls allocates one of each inside mbedtls_ssl_setup(),
+    so every concurrent session pays both.
+
+    The output buffer was 8192 and nothing ever filled it. Every writer goes
+    through https_write_all(), which hands mbedtls at most HTTPS_TX_CHUNK_SIZE
+    -- 512 bytes -- at a time, and a larger write is split by the loop rather
+    than by the buffer. What does need room is the handshake: the Certificate
+    message goes out in one record, and one ~900-byte DER certificate fits in
+    2048 with room to spare.
+
+    At 2048 a session costs about 6 KB less. With four contexts (three HTTPS
+    sockets plus the S2E one) that is 24 KB of heap demand that simply is not
+    there any more, which is worth more than the same number of bytes added to
+    the heap: bytes never asked for cannot fragment it.                      */
 #define MBEDTLS_SSL_IN_CONTENT_LEN              2048
-#define MBEDTLS_SSL_OUT_CONTENT_LEN             8192
+#define MBEDTLS_SSL_OUT_CONTENT_LEN             2048
 
 #define MBEDTLS_PLATFORM_C
 #define MBEDTLS_PLATFORM_MEMORY
