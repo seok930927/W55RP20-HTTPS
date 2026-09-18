@@ -530,7 +530,23 @@ int wiz_tls_server_init(wiz_tls_context* tlsContext, int* socket_fd) {
                                    mbedtls_ssl_cache_get,
                                    mbedtls_ssl_cache_set);
 
-    ret = mbedtls_ssl_setup(tlsContext->ssl, tlsContext->conf);
+    /*  mbedtls_ssl_setup() is where a session's record buffers are allocated,
+        and they are the biggest thing it asks for. Which heap they come out of
+        decides which number matters, and getting that backwards already cost
+        one round -- App.c points mbedtls_calloc at pvPortCalloc, but whether
+        that took effect is a question the build can only answer by measuring.
+
+        So: ucHeap free on either side of the call. A drop of roughly five
+        kilobytes says mbedtls is on ucHeap. No movement says it is on the C
+        heap and ucHeap's free figure has nothing to do with the reboot. */
+    {
+        size_t before = xPortGetFreeHeapSize();
+
+        ret = mbedtls_ssl_setup(tlsContext->ssl, tlsContext->conf);
+        PRT_SSL("ssl_setup: ucHeap %u -> %u (used %d)\r\n",
+                (unsigned)before, (unsigned)xPortGetFreeHeapSize(),
+                (int)(before - xPortGetFreeHeapSize()));
+    }
     if (ret != 0) {
         PRT_SSL(" failed\r\n  ! mbedtls_ssl_setup returned -0x%x\r\n", -ret);
         return -1;

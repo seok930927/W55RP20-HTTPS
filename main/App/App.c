@@ -111,6 +111,23 @@ TaskHandle_t seg_mqtt_yield_task_handle = NULL;
     Functions
     ----------------------------------------------------------------------------------------------------
 */
+/*  How much RAM the C heap has to work with.
+
+    The linker lays RAM out as .data, .bss, then the C heap growing up toward
+    the stack coming down from the top, and marks the two ends. Nothing in the
+    SDK reports this at run time, which is part of why it went unnoticed: the
+    only heap with a published free-space figure was the other one.
+
+    Static, not live -- it is the budget, not the usage. The budget is the
+    number that moves when configTOTAL_HEAP_SIZE changes, and that is the one
+    that was wrong. */
+static size_t c_heap_size(void) {
+    extern char __end__;        /* first byte after .bss  */
+    extern char __StackLimit;   /* highest the heap may go */
+
+    return (size_t)(&__StackLimit - &__end__);
+}
+
 static void RP2040_Init(void);
 static void RP2040_W5X00_Init(void);
 static void set_W5X00_NetTimeout(void);
@@ -197,14 +214,51 @@ static void set_minimal_runtime_config(void) {
         baud_rate / data_bits / parity / protocol were never forced (stored). */
 }
 
+/*  How close the heap has come to running out.
+
+    It used to print both figures five times a second, which is why it was
+    commented out rather than used. What is worth knowing is not the current
+    free heap -- that moves constantly -- but the low-water mark, and that
+    only matters when it moves. So this reports the minimum-ever free heap
+    when it drops, and says nothing the rest of the time.
+
+    Leave it running. A line every few minutes costs nothing, and the number
+    it prints is the one that says how much margin the next batch of HTTPS
+    sessions actually had. */
 void heap_monitor_task(void *argument) {
     (void)argument;
+    size_t last_min = (size_t) - 1;
 
     while (1) {
-        printf("Free heap: %d\n", xPortGetFreeHeapSize());
-        printf("Min free heap: %d\n", xPortGetMinimumEverFreeHeapSize());
-        vTaskDelay(pdMS_TO_TICKS(200));
+        size_t min_free = xPortGetMinimumEverFreeHeapSize();
+
+        if (min_free < last_min) {
+            last_min = min_free;
+            printf("Heap low-water: %u bytes free of %u (now %u)\r\n",
+                   (unsigned)min_free, (unsigned)configTOTAL_HEAP_SIZE,
+                   (unsigned)xPortGetFreeHeapSize());
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
+}
+
+/*  Called by heap_4 when an allocation cannot be served.
+
+    It does not stop the unit. A TLS session that cannot get its buffers is a
+    refused connection, and the callers handle that now -- killing the box
+    because a browser opened one window too many is the behaviour this whole
+    change exists to remove. What it does is leave a mark, so "the page did
+    not load" and "the heap was empty" can be tied together afterwards.
+
+    configUSE_MALLOC_FAILED_HOOK must be 1 for this to be called. */
+void vApplicationMallocFailedHook(void) {
+    static uint32_t fail_count;
+
+    fail_count++;
+    printf("malloc failed (%lu so far), %u bytes free, low-water %u\r\n",
+           (unsigned long)fail_count,
+           (unsigned)xPortGetFreeHeapSize(),
+           (unsigned)xPortGetMinimumEverFreeHeapSize());
 }
 
 void start_task(void *argument) {
@@ -230,6 +284,26 @@ void start_task(void *argument) {
 
     // MHz 단위로 변환해서 출력
     printf("Current System Clock: %lu Hz (%lu MHz)\n", current_hz, current_hz / 1000000);
+
+    /*  Why the unit came up.
+
+        A hung core and a deliberate reset look the same in the log -- both
+        just start printing the banner again -- and chasing the reboot cost a
+        lot of guessing for exactly that reason. The RP2040 keeps the answer
+        in a watchdog register across the reset, so print it before anything
+        can overwrite the story.
+
+        RESET means somebody or something asked for one (power-up, BOOTSEL,
+        the reset timer). WATCHDOG means a core stopped feeding it, which is
+        what a hard fault or a spin inside a critical section looks like. */
+    /*  Both heaps, because there are two and the first pass at this looked at
+        one of them. ucHeap is the array FreeRTOS hands out; the C heap is the
+        RAM left over after .bss, which is what newlib malloc grows into and
+        what the pico-sdk panics about. Raising one shrinks the other, so the
+        two numbers only mean anything side by side. */
+    printf("Boot cause: %s, ucHeap %u bytes, C heap %u bytes\r\n",
+           watchdog_caused_reboot() ? "WATCHDOG" : "RESET",
+           (unsigned)configTOTAL_HEAP_SIZE, (unsigned)c_heap_size());
 
     load_DevConfig_from_storage();
     RP2040_Board_Init();
@@ -344,7 +418,7 @@ void start_task(void *argument) {
         rows in the order tasks ask for them, so the polling protocols keep the
         low rows they had and the contact inputs follow on behind. */
     xTaskCreate(digitalInput_task, "Digital_Input_Task", DIGITAL_INPUT_TASK_STACK_SIZE, NULL, DIGITAL_INPUT_TASK_PRIORITY, NULL);
-    // xTaskCreate(heap_monitor_task, "Heap_Monitor_Task", HEAP_MONITOR_TASK_STACK_SIZE, NULL, HEAP_MONITOR_TASK_PRIORITY, NULL);
+    xTaskCreate(heap_monitor_task, "Heap_Monitor_Task", HEAP_MONITOR_TASK_STACK_SIZE, NULL, HEAP_MONITOR_TASK_PRIORITY, NULL);
 #ifdef __USE_WATCHDOG__
     watchdog_enable(8388, 0);
 #endif

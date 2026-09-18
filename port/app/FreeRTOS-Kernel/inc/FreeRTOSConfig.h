@@ -72,12 +72,34 @@
 /* Memory allocation related definitions. */
 #define configSUPPORT_STATIC_ALLOCATION         0
 #define configSUPPORT_DYNAMIC_ALLOCATION        1
+/*  There are two heaps on this part and they share one pool of RAM. Raising
+    this number takes the difference away from the other one.
+
+        ucHeap   this. pvPortMalloc. Task stacks and anything that asks
+                 FreeRTOS for memory. A fixed array in .bss.
+        C heap   newlib malloc, and the pico-sdk wrapper that calls
+                 panic("Out of memory") when it cannot serve a request. It
+                 is whatever RAM is left over after .bss, growing up toward
+                 the stack -- so it is exactly 256 KB minus everything else,
+                 and this array is part of everything else.
+
+    That is worth spelling out because it has already cost a round. Chasing a
+    reboot under rapid HTTPS reconnects, this was raised 96 KB -> 144 KB on the
+    theory that TLS was running ucHeap dry. It was not: the instrumentation
+    added at the same time reported 85,912 bytes of ucHeap still free, and the
+    unit then died on the *first* HTTPS connection with the C heap's panic,
+    because those 48 KB came straight out of the C heap's 64 KB.
+
+    Back at 96 KB. ucHeap idles at about 61 KB used, nearly all of it the ten
+    task stacks, and the low-water line in App.c says how much of the rest is
+    ever touched. The C heap's budget is printed next to it at boot. Change
+    this number only against those two figures. */
 #define configTOTAL_HEAP_SIZE                   (96*1024)
 #define configAPPLICATION_ALLOCATED_HEAP        0
 
 /* Hook function related definitions. */
 #define configCHECK_FOR_STACK_OVERFLOW          1
-#define configUSE_MALLOC_FAILED_HOOK            0
+#define configUSE_MALLOC_FAILED_HOOK            1
 #define configUSE_DAEMON_TASK_STARTUP_HOOK      0
 
 /* Run time and task stats gathering related definitions. */
